@@ -89,8 +89,12 @@ class SnapshotStorage:
                 IfNoneMatch="*",
             )
         except Exception as exc:
-            LOGGER.exception("Snapshot upload failed key=%s", key)
-            raise SnapshotStorageError(f"Failed to upload snapshot key {key!r}") from exc
+            LOGGER.error(
+                "Snapshot upload failed operation=put_object key=%s error_type=%s",
+                key,
+                type(exc).__name__,
+            )
+            raise SnapshotStorageError("Snapshot upload failed") from exc
 
         LOGGER.info(
             "Snapshot upload successful key=%s bytes=%d region=%s",

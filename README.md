@@ -1,159 +1,311 @@
 # DriftMind
 
-DriftMind is an autonomous, AI-powered infrastructure intelligence agent for AWS. It is being developed for the AWS Builder Center **Always-On Agent Weekend Challenge**.
+DriftMind is an AI-powered infrastructure intelligence prototype for AWS. It converts versioned infrastructure snapshots into deterministic change evidence, asks Amazon Bedrock for a strictly structured executive analysis, and delivers an escaped HTML and plain-text report through Amazon SES.
 
-> **Project status:** Phase 5 — snapshot collection, deterministic infrastructure diffing, Bedrock intelligence, and SES notification reporting are implemented and covered by unit tests. EventBridge scheduling, retry queues, CloudWatch alarms, infrastructure as code, and alternate notification channels are not included.
+> **Status:** Feature-complete prototype. Snapshot, diff, intelligence, and notification components are implemented and unit tested. Scheduled deployment infrastructure and full end-to-end Lambda orchestration are not yet implemented.
 
-## Phase 2: Infrastructure Snapshot Engine
+## Project Overview
 
-The executable snapshot pipeline loads configuration from `SNAPSHOT_BUCKET`, `AWS_REGION`, and `PROVIDER`; loads the configured provider; generates and validates a schema `1.0` snapshot; serializes deterministic JSON; and uploads it to Amazon S3. Phase 2 implements only `DemoProvider`, which returns deterministic EC2 instance, security group, and S3 bucket models without calling AWS APIs. `AWSProvider` remains the explicit future provider placeholder.
+DriftMind is designed to help teams understand infrastructure drift without manually reviewing raw configuration documents. Its deterministic pipeline identifies exactly what was added, removed, or modified before any generative model is invoked. Amazon Bedrock receives only that validated change report, and its response must satisfy a strict JSON contract before it can be formatted and delivered.
 
-Snapshots contain exactly `schema_version`, `generated_at`, `provider`, `environment`, and `resources`. Objects are written with server-side AES256 encryption and a conditional create to `snapshots/YYYY/MM/DD/snapshot-<timestamp>.json`.
+The current prototype includes a deterministic demo provider, S3 snapshot storage, local previous/current snapshot loading, property-level comparison, Bedrock Runtime integration, and multipart SES reporting. It does not yet collect live AWS resources, discover snapshot history in S3, or provision a scheduled AWS deployment.
 
-## Phase 3: Infrastructure Diff Engine
+## Problem Statement
 
-The diff engine strictly loads previous and current schema `1.0` snapshots from local UTF-8 JSON files, validates them through the Phase 2 models, and requires matching schema version, provider, and environment. It detects added and removed resources by `(resource_type, logical_name)` identity and recursively detects modified properties. Unchanged resources and properties are omitted.
+AWS environments evolve through deployments, automation, console actions, and service-managed operations. Although configuration data is available, answering practical questions can still require significant manual effort:
 
-Reports contain exactly `summary` and `changes`. Each change contains `change_id`, `change_type`, `resource_type`, `logical_name`, `field`, `old`, and `new`. IDs such as `CHG-0001` are assigned after deterministic ordering. Added and removed resources use `field: null`; modified fields use dotted property paths such as `tags.Environment`. The report contains no generated prose.
+- What changed since the previous observation?
+- Which resources and properties were affected?
+- What operational, security, or cost implications are supported by the evidence?
+- How can decision-makers receive a concise, readable report?
 
-## Phase 4: Amazon Bedrock Intelligence Engine
+## Solution
 
-The intelligence service accepts a validated Phase 3 report, builds a deterministic prompt, invokes Amazon Bedrock through the Runtime Converse API, strictly parses the returned JSON, and returns a typed `ExecutiveAnalysis`. The prompt identifies DriftMind and the analyst role, embeds only the supplied report, rejects reports larger than 100,000 UTF-8 bytes, prohibits invented infrastructure and speculation, and requires conclusions and review actions to remain grounded in change IDs.
+DriftMind separates evidence generation from AI interpretation:
 
-Bedrock configuration comes only from environment variables:
+1. Create and validate a versioned infrastructure snapshot.
+2. Compare it with a previous compatible snapshot.
+3. Produce a deterministic report of additions, removals, and property changes.
+4. Submit only that report to Amazon Bedrock with strict grounding instructions.
+5. Validate the model's JSON response.
+6. Format matching HTML and plain-text reports and deliver them through Amazon SES.
 
-- Required: `AWS_REGION`, `BEDROCK_MODEL_ID`
-- Optional: `BEDROCK_TEMPERATURE` (default `0.0`), `BEDROCK_MAX_TOKENS` (default `1024`)
+This boundary keeps infrastructure detection deterministic and auditable while using generative AI only to interpret explicit change evidence.
 
-No model ID is hardcoded. The response must be one JSON object containing exactly `summary`, `security_impact`, `operational_impact`, `cost_impact`, and `recommendations`. Markdown, surrounding prose, missing or extra fields, duplicate fields, invalid types, and malformed JSON are rejected. API failures are wrapped without returning or logging provider exception details.
+## Key Features
 
-## Phase 5: Notification & Reporting Engine
+- See added, removed, and modified infrastructure resources at property level.
+- Receive stable change identifiers that make findings easy to reference.
+- Generate executive analysis grounded only in the supplied change report.
+- Reject malformed or structurally invalid model responses.
+- Receive readable HTML email with a plain-text fallback.
+- Preserve deterministic snapshot, diff, prompt, and report formatting.
+- Exercise every AWS integration locally through fully mocked unit tests.
+- Keep service configuration external to source control.
 
-`NotificationService` converts a validated `ExecutiveAnalysis` into matching HTML and plain-text reports using an injectable UTC generation timestamp. Reports include the title, timestamp, executive summary, security, operational and cost impacts, recommendations, and footer. HTML model content is escaped, and no external CSS or JavaScript is used.
+## High-Level Architecture
 
-SES configuration comes only from required environment variables:
+```text
+Amazon EventBridge (intended deployment; not provisioned)
+        |
+        v
+AWS Lambda orchestration (intended; only the snapshot handler exists)
+        |
+        v
+Snapshot Engine ---> Amazon S3 snapshot object
+        |
+        v
+Previous Snapshot Loader (local JSON in the current prototype)
+        |
+        v
+Diff Engine
+        |
+        v
+Amazon Bedrock Runtime
+        |
+        v
+Validated Executive Analysis
+        |
+        v
+Report Formatter
+        |
+        v
+Amazon SES
+```
 
-- `AWS_REGION`
-- `SES_SENDER`
-- `SES_RECIPIENT`
+EventBridge scheduling and complete Lambda orchestration represent the intended deployment architecture. The repository currently implements the individual processing and delivery components, not the scheduled infrastructure that connects them in AWS. See [architecture/architecture.md](architecture/architecture.md) for the detailed design and implementation boundaries.
 
-The SES adapter validates plain email addresses, creates an explicit UTF-8 `multipart/alternative` message, and sends it through `send_raw_email`. Successful delivery returns a typed result containing the SES message ID and `sent` status. Provider failures are sanitized, and recipient addresses, report bodies, credentials, and raw provider errors are not logged.
+## Example Workflow
 
-Run the complete unit suite from the repository root:
+```text
+Scheduled Run (intended EventBridge trigger)
+        |
+        v
+Snapshot Created
+        |
+        v
+Previous Snapshot Loaded
+        |
+        v
+Deterministic Diff Generated
+        |
+        v
+Bedrock Analysis Validated
+        |
+        v
+Executive Report Formatted
+        |
+        v
+Amazon SES Delivery
+```
+
+In the current prototype, snapshot creation, local snapshot loading, diffing, Bedrock analysis, formatting, and SES delivery are implemented as composable components. The scheduled trigger, S3 history discovery, and single end-to-end orchestrator remain future work.
+
+## AWS Services Used
+
+| AWS service | Role | Current status |
+| --- | --- | --- |
+| Amazon S3 | Stores validated snapshot JSON objects | Storage adapter implemented; bucket provisioning is not included |
+| Amazon Bedrock Runtime | Converts deterministic diffs into structured executive analysis | Converse API wrapper, prompt, and response validation implemented |
+| Amazon SES | Sends UTF-8 multipart reports with HTML and plain-text alternatives | `send_raw_email` adapter implemented |
+| AWS Lambda | Intended runtime for the workflow | Snapshot Lambda handler implemented; complete workflow orchestration is not |
+| Amazon EventBridge | Intended scheduled trigger | Not provisioned or implemented |
+| Amazon CloudWatch | Intended destination for Lambda logs and operational telemetry | Standard structured-style logging exists; custom metrics and alarms do not |
+
+AWS integrations use the AWS SDK for Python (`boto3`) and support injected clients for testing.
+
+## Repository Structure
+
+Project files, excluding Git metadata and ignored Python caches:
+
+```text
+driftmind/
+├── .env.example
+├── .gitignore
+├── LICENSE
+├── README.md
+├── config.py
+├── logger.py
+├── models.py
+├── requirements.txt
+├── storage.py
+├── architecture/
+│   └── architecture.md
+├── docs/
+│   ├── AWS_SERVICES.md
+│   ├── DEVELOPMENT_PLAN.md
+│   └── PROJECT_SPEC.md
+├── lambda/
+│   ├── app.py
+│   ├── ai/
+│   │   ├── client.py
+│   │   ├── models.py
+│   │   ├── parser.py
+│   │   ├── prompt.py
+│   │   └── service.py
+│   ├── diff/
+│   │   ├── comparator.py
+│   │   ├── loader.py
+│   │   ├── models.py
+│   │   └── report.py
+│   └── notification/
+│       ├── email.py
+│       ├── formatter.py
+│       ├── models.py
+│       └── service.py
+├── prompts/
+│   └── .gitkeep
+├── providers/
+│   ├── aws_provider.py
+│   ├── base.py
+│   └── demo_provider.py
+├── sample_data/
+│   └── .gitkeep
+├── screenshots/
+│   └── .gitkeep
+├── snapshot/
+│   └── collector.py
+├── snapshots/
+│   └── .gitkeep
+└── tests/
+    ├── test_ai_engine.py
+    ├── test_diff_engine.py
+    ├── test_notification.py
+    └── test_snapshot.py
+```
+
+## Installation
+
+DriftMind targets **Python 3.12**.
+
+```shell
+git clone <repository-url>
+cd driftmind
+python -m venv .venv
+```
+
+Activate the environment:
+
+```powershell
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+```
+
+```shell
+# macOS or Linux
+source .venv/bin/activate
+```
+
+Install the repository requirements:
+
+```shell
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+The test suite uses the Python standard library and does not require live AWS access. AWS Lambda's Python runtime includes `boto3`; invoking an AWS adapter outside Lambda requires a compatible local `boto3` installation and credentials available through the standard AWS SDK credential chain.
+
+There is currently no deployment command or end-to-end CLI. Use the unit suite to run the implemented workflow components locally without contacting AWS.
+
+## Configuration
+
+Configuration is read directly from process environment variables. The application does not load `.env` files automatically.
+
+| Variable | Required by | Description | Default |
+| --- | --- | --- | --- |
+| `AWS_REGION` | Snapshot storage, Bedrock, SES | AWS Region used to initialize service clients | None |
+| `SNAPSHOT_BUCKET` | Snapshot storage | Existing S3 bucket that receives snapshot JSON | None |
+| `PROVIDER` | Snapshot collection | Provider name; only `demo` is executable today | None |
+| `BEDROCK_MODEL_ID` | Bedrock intelligence | Bedrock model or inference profile identifier | None |
+| `BEDROCK_TEMPERATURE` | Bedrock intelligence | Temperature from `0.0` to `1.0` | `0.0` |
+| `BEDROCK_MAX_TOKENS` | Bedrock intelligence | Positive maximum output-token count | `1024` |
+| `SES_SENDER` | SES delivery | One plain sender email address configured for SES | None |
+| `SES_RECIPIENT` | SES delivery | One plain recipient email address permitted by SES | None |
+
+No model ID, bucket, account identifier, sender, or recipient is hardcoded. Selecting `aws` as the provider reaches the intentionally unimplemented `AWSProvider`; the deterministic `demo` provider is the only current collector.
+
+## Running Tests
+
+Run the complete suite from the repository root:
 
 ```shell
 python -m unittest discover -s tests -v
 ```
 
-Bedrock and S3 are fully mocked or injected in tests; the suite makes no AWS calls.
+The tests mock or inject S3, Bedrock Runtime, and SES clients. They do not call AWS or send email.
 
-## Project Overview
+## Implemented Components
 
-DriftMind runs on a schedule, captures a normalized snapshot of selected AWS infrastructure, compares it with the previous snapshot, and uses Amazon Bedrock to explain meaningful changes and their likely operational impact. It then sends a concise executive summary by email.
+### Infrastructure Snapshot Engine
 
-## Problem Statement
+- Schema `1.0` snapshot and resource dataclasses with strict validation
+- Deterministic demo resources for an EC2 instance, security group, and S3 bucket
+- Canonical JSON serialization and date-partitioned S3 object keys
+- Conditional, AES256-encrypted S3 uploads
+- Environment-based snapshot configuration
+- Snapshot-focused Lambda handler
 
-Cloud environments change continuously through deployments, automation, console actions, and service-managed operations. Raw audit events and configuration data are valuable, but they can be difficult to turn into a timely answer to three practical questions: **What changed? Why does it matter? What should be reviewed next?**
+Live AWS resource collection is not implemented; `AWSProvider` is an explicit placeholder.
 
-## Solution
+### Infrastructure Diff Engine
 
-DriftMind creates a recurring infrastructure intelligence loop:
+- Strict loading of previous and current snapshots from local JSON files
+- Compatibility checks for schema version, provider, and environment
+- Added, removed, and recursively modified property detection
+- Stable sequential identifiers such as `CHG-0001`
+- Deterministic JSON reports containing numeric summaries and before/after evidence
 
-1. Collect the current infrastructure state.
-2. Load the most recent prior state.
-3. Compute a deterministic change set.
-4. Ask Amazon Bedrock to explain and assess the changes.
-5. Email an executive summary and retain the new snapshot for the next run.
+S3 snapshot-history scanning and automatic baseline selection are not implemented.
 
-Deterministic collection and comparison remain separate from generative analysis so that results are auditable and AI output is grounded in explicit evidence.
+### Amazon Bedrock Intelligence Engine
 
-## Features
+- Deterministic, versioned prompt with explicit grounding and anti-hallucination rules
+- Fixed input-size bound that rejects oversized evidence without truncating it
+- Environment-configured Bedrock Runtime Converse client
+- Strict parsing of the exact executive-analysis JSON schema
+- Typed executive analysis and recommendation models
+- Redacted provider failures and lifecycle logging
 
-- Scheduled, unattended infrastructure reviews
-- Normalized and versioned AWS resource snapshots
-- Deterministic detection of additions, removals, and modifications
-- Bedrock-generated explanations grounded in the computed diff
-- Operational impact and review guidance
-- Executive email summaries through Amazon SES
-- CloudWatch logs, metrics, and alarms for operational visibility
-- Privacy-aware reporting with least-privilege access as a design goal
+Structural validation ensures response shape and types; it does not independently prove the semantic accuracy of model conclusions.
 
-## High-Level Architecture
+### Notification & Reporting Engine
 
-Amazon EventBridge invokes an AWS Lambda workflow on a configured schedule. Lambda queries supported AWS APIs with `boto3`, writes snapshots to Amazon S3, and compares the current snapshot with the previous successful snapshot. The resulting structured diff is supplied to Amazon Bedrock for analysis. Lambda formats the grounded response and sends it through Amazon SES. Amazon CloudWatch captures logs, metrics, and alarms across the workflow.
+- Deterministic HTML and plain-text executive reports
+- Correct escaping of model content in HTML
+- UTC generation timestamp and matching report sections
+- Environment-configured SES sender and recipient
+- Explicit UTF-8 `multipart/alternative` MIME generation
+- Typed successful-delivery result containing the SES message ID
+- Redacted SES failures and delivery lifecycle logging
 
-Detailed design decisions are documented in [architecture/architecture.md](architecture/architecture.md).
+Retries, persisted idempotency, retry queues, and alternate notification channels are not implemented.
 
-## AWS Services
+## Security Principles
 
-| Service | Purpose |
-| --- | --- |
-| Amazon EventBridge | Starts each scheduled analysis run |
-| AWS Lambda | Coordinates collection, comparison, analysis, and reporting |
-| Amazon S3 | Stores durable, versionable infrastructure snapshots and run artifacts |
-| Amazon Bedrock | Explains detected changes and evaluates operational impact |
-| Amazon SES | Delivers the executive email summary |
-| Amazon CloudWatch | Provides logs, metrics, dashboards, and alarms |
-
-## Repository Structure
-
-```text
-driftmind/
-├── README.md
-├── LICENSE
-├── .gitignore
-├── requirements.txt
-├── architecture/
-│   └── architecture.md
-├── docs/
-│   ├── PROJECT_SPEC.md
-│   ├── DEVELOPMENT_PLAN.md
-│   └── AWS_SERVICES.md
-├── article/
-│   └── builder-center.md
-├── lambda/
-├── prompts/
-├── sample_data/
-├── screenshots/
-├── snapshots/
-└── tests/
-```
-
-Empty working directories contain `.gitkeep` files so Git can retain the project structure.
-
-## Planned Implementation Phases
-
-1. **Repository:** Establish scope, architecture, documentation, licensing, and project structure.
-2. **Infrastructure Snapshot Engine:** Collect and normalize selected AWS resource metadata and persist versioned snapshots.
-3. **Diff Engine:** Compare compatible snapshots and produce a deterministic structured change set.
-4. **Bedrock Intelligence:** Generate grounded explanations and operational-impact assessments from the diff.
-5. **Email Reporting:** Format and deliver reports through SES with observable failure handling.
-6. **Documentation:** Finalize deployment, operations, security, testing, and Builder Center materials using verified results.
-
-See [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) for phase inputs, outputs, and deliverables.
-
-## Development Principles
-
-- Python 3.12 for application code
-- AWS SDK for Python (`boto3`) for AWS integrations
-- Least-privilege IAM and explicit data boundaries
-- Deterministic snapshots and diffs before generative interpretation
-- Versioned schemas, prompts, and artifacts
-- Structured observability without logging secrets or unnecessary infrastructure data
+- **Least privilege:** AWS roles should permit only the required S3, Bedrock Runtime, SES, and logging actions for the selected resources.
+- **Deterministic evidence first:** Snapshots and diffs are validated before generative interpretation, preserving a clear evidence boundary.
+- **No credential logging:** Credentials, report bodies, model output, and recipient addresses are not written to application logs.
+- **Provider error redaction:** S3, Bedrock, and SES failures expose sanitized application errors without raw provider messages in logs or public responses.
+- **Environment-only configuration:** AWS Region, storage, model, sender, and recipient settings remain outside source code.
 
 ## Future Enhancements
 
-- Multi-account and multi-Region collection through AWS Organizations
-- Broader AWS resource coverage and configurable collector plug-ins
-- Trend analysis across more than two snapshots
-- Change correlation with approved deployment and audit metadata
-- Additional notification channels and report formats
-- Interactive investigation with citations to stored evidence
-- Human-approved remediation workflows with strict safety controls
+- Implement read-only collection of live AWS resources in `AWSProvider`.
+- Discover compatible previous snapshots from S3.
+- Connect all components through a complete Lambda orchestrator.
+- Provision scheduled execution with EventBridge and infrastructure as code.
+- Add bounded retries, delivery idempotency, operational metrics, and alarms.
+- Expand to multiple AWS accounts, Regions, and resource types.
+- Add historical trend analysis and deployment-event correlation.
+- Support additional report destinations behind explicit safety controls.
+
+## Project Background
+
+DriftMind was originally developed for the AWS Builder Center **Always-On Agent Weekend Challenge**. The repository is structured as an open-source foundation for further infrastructure intelligence work rather than as a challenge-specific demo.
 
 ## Contributing
 
-Contribution guidance and issue templates will be added with the first implementation phase. Until then, use the project specification and architecture documents as the source of truth for proposed changes.
+Contributions are welcome. Before proposing a change, review [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md) and [architecture/architecture.md](architecture/architecture.md), open an issue describing the intended behavior, and preserve the deterministic evidence boundary. Changes should include focused tests and must not introduce live AWS calls into the unit suite.
 
 ## License
 

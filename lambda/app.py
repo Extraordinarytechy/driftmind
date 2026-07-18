@@ -54,9 +54,12 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     try:
         return run_snapshot_pipeline()
     except Exception as exc:  # Lambda boundary must log all pipeline failures.
-        LOGGER.exception("Snapshot pipeline failed error_type=%s", type(exc).__name__)
+        LOGGER.error(
+            "Snapshot pipeline failed operation=run_snapshot_pipeline error_type=%s",
+            type(exc).__name__,
+        )
         return {
             "status": "error",
             "error_type": type(exc).__name__,
-            "message": str(exc),
+            "message": "Snapshot pipeline execution failed.",
         }

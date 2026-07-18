@@ -41,3 +41,5 @@ snapshots/*
 !snapshots/.gitkeep
 sample_data/generated/
 *.log
+article/
+.env.example

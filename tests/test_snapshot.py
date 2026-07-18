@@ -11,7 +11,12 @@ from unittest.mock import Mock
 from models import SCHEMA_VERSION, Snapshot, SnapshotResource, SnapshotValidationError
 from providers.demo_provider import DemoProvider
 from snapshot.collector import SnapshotCollector
-from storage import SnapshotStorage, build_snapshot_key, serialize_snapshot
+from storage import (
+    SnapshotStorage,
+    SnapshotStorageError,
+    build_snapshot_key,
+    serialize_snapshot,
+)
 
 FIXED_TIME = datetime(2026, 7, 18, 12, 34, 56, 789000, tzinfo=timezone.utc)
 
@@ -129,6 +134,36 @@ class SnapshotStorageTests(unittest.TestCase):
         self.assertEqual(upload["IfNoneMatch"], "*")
         self.assertEqual(json.loads(upload["Body"]), make_snapshot().to_dict())
 
+    def test_upload_failure_is_generic_logged_and_preserves_cause(self) -> None:
+        provider_message = "raw AWS response containing secret material"
+        provider_error = RuntimeError(provider_message)
+        s3_client = Mock()
+        s3_client.put_object.side_effect = provider_error
+        storage = SnapshotStorage(
+            bucket="unit-test-snapshots",
+            region="us-east-1",
+            s3_client=s3_client,
+        )
+
+        with self.assertLogs("storage", level="ERROR") as captured:
+            with self.assertRaisesRegex(
+                SnapshotStorageError, "^Snapshot upload failed$"
+            ) as raised:
+                storage.upload(make_snapshot())
+
+        self.assertIs(raised.exception.__cause__, provider_error)
+        self.assertNotIn(provider_message, str(raised.exception))
+        log_output = "\n".join(captured.output)
+        self.assertIn("operation=put_object", log_output)
+        self.assertIn("error_type=RuntimeError", log_output)
+        self.assertIn(
+            "snapshots/2026/07/18/snapshot-20260718T123456789000Z.json",
+            log_output,
+        )
+        self.assertNotIn(provider_message, log_output)
+        self.assertNotIn("unit-test-snapshots", log_output)
+        self.assertNotIn("Traceback", log_output)
+
 
 class LambdaPipelineTests(unittest.TestCase):
     def test_lambda_handler_executes_locally_with_mock_s3(self) -> None:
@@ -165,6 +200,37 @@ class LambdaPipelineTests(unittest.TestCase):
 
         self.assertEqual(response["status"], "error")
         self.assertEqual(response["error_type"], "ConfigurationError")
+        self.assertEqual(response["message"], "Snapshot pipeline execution failed.")
+
+    def test_lambda_handler_redacts_provider_message_and_logs_failure(self) -> None:
+        app = importlib.import_module("lambda.app")
+        mock_module = importlib.import_module("unittest.mock")
+        provider_message = "raw provider response containing secret material"
+
+        with (
+            mock_module.patch.object(
+                app,
+                "run_snapshot_pipeline",
+                side_effect=RuntimeError(provider_message),
+            ),
+            self.assertLogs("lambda.app", level="ERROR") as captured,
+        ):
+            response = app.lambda_handler({}, None)
+
+        self.assertEqual(
+            response,
+            {
+                "status": "error",
+                "error_type": "RuntimeError",
+                "message": "Snapshot pipeline execution failed.",
+            },
+        )
+        self.assertNotIn(provider_message, str(response))
+        log_output = "\n".join(captured.output)
+        self.assertIn("operation=run_snapshot_pipeline", log_output)
+        self.assertIn("error_type=RuntimeError", log_output)
+        self.assertNotIn(provider_message, log_output)
+        self.assertNotIn("Traceback", log_output)
 
 
 if __name__ == "__main__":

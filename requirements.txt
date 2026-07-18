@@ -1,3 +1,1 @@
-# Phase 1 intentionally has no runtime dependencies.
-# Runtime and development dependencies will be pinned when application code is introduced.
-# AWS integrations will use the Python 3.12-compatible boto3 SDK.
+boto3>=1.39,<2.0
