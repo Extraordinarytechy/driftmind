@@ -54,18 +54,23 @@ Development is incremental. Each phase must preserve deterministic behavior, tra
 
 ## Phase 4 — Bedrock Intelligence
 
-**Goal:** Turn a structured diff into a grounded explanation and operational-impact assessment.
+**Status:** Completed.
 
-**Inputs:** Validated bounded diff, approved resource context, prompt version, model configuration, and output schema.
+**Goal:** Turn a validated structured diff into a grounded, typed executive analysis through Amazon Bedrock.
 
-**Outputs:** Validated analysis containing a summary, evidence-linked observations, impact, uncertainty, and suggested review actions.
+**Inputs:** A validated Phase 3 `ChangeReport`; prompt version `1.0`; required `AWS_REGION` and `BEDROCK_MODEL_ID`; optional validated temperature and token settings; and the strict response schema.
 
-**Deliverables:**
-- Versioned system and task prompts in `prompts/`
-- Bedrock invocation adapter with explicit model and inference settings
-- Input redaction, truncation, and token-budget policy
-- Response schema validation and unsupported-claim safeguards
-- Deterministic fallback behavior for unavailable or invalid model responses
+**Outputs:** `ExecutiveAnalysis` with `summary`, `security_impact`, `operational_impact`, `cost_impact`, and typed `recommendations`.
+
+**Delivered:**
+- Deterministic prompt builder containing agent identity, project purpose, delimited diff evidence, grounding rules, and exact JSON output schema
+- Fixed 100,000-byte input bound that rejects oversized reports without corrupting deterministic evidence
+- Environment-only Bedrock Runtime Converse client with explicit model, temperature, and maximum-token settings
+- Structured invocation response metadata and failure wrapping that omits provider details and credentials
+- Strict JSON parser rejecting malformed/nonstandard JSON, duplicate/missing/extra fields, invalid field types, and invalid recommendations
+- Frozen dataclass models for executive analysis and recommendations
+- Cohesive service orchestration with lifecycle and failure logging
+- Fully mocked tests for prompt determinism, parser success/failures, model invocation/failure, and service orchestration
 
 ## Phase 5 — Email Reporting
 

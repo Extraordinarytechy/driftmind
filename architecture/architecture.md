@@ -33,7 +33,11 @@ The implemented Phase 3 engine is a pure, deterministic Python component. It com
 
 ### Intelligence Layer
 
-Amazon Bedrock receives a size-bounded structured diff and approved metadata, never unrestricted account data. A versioned prompt requests a concise explanation, likely operational impact, uncertainty, and suggested human review. Responses must pass structural validation and remain clearly distinct from deterministic findings.
+The implemented Phase 4 intelligence service accepts only a validated Phase 3 `ChangeReport`. Its version `1.0` deterministic prompt identifies DriftMind and the Infrastructure Intelligence Analyst role, includes the complete canonical diff as delimited data, and instructs the model to avoid invented infrastructure, speculation, and unsupported conclusions. Reports larger than 100,000 UTF-8 bytes are rejected rather than truncated into inconsistent evidence.
+
+The Bedrock wrapper uses the Runtime Converse API. `AWS_REGION` and `BEDROCK_MODEL_ID` are required environment variables; `BEDROCK_TEMPERATURE` and `BEDROCK_MAX_TOKENS` are optional validated settings. The wrapper logs model ID, prompt size, request ID, stop reason, and error type, but never logs prompt content, model output, AWS credentials, or provider exception details.
+
+Model output must be strict JSON with exactly `summary`, `security_impact`, `operational_impact`, `cost_impact`, and `recommendations`. The parser rejects malformed or nonstandard JSON, duplicate/missing/extra fields, invalid scalar types, and invalid recommendation entries, then returns a typed `ExecutiveAnalysis`. Prompt grounding reduces unsupported claims; structural validation does not independently prove model claims.
 
 ### Report Delivery
 
@@ -65,6 +69,17 @@ Amazon CloudWatch receives structured logs, service metrics, and alarms. Logs co
 8. The report serializer emits deterministic UTF-8 JSON containing no natural-language summary.
 
 Phase 3 loads explicit local files only. It does not scan S3 history or choose a previous snapshot.
+
+## Implemented Phase 4 Data Flow
+
+1. `IntelligenceService` receives and validates a Phase 3 change report.
+2. The prompt builder serializes the report deterministically, applies the fixed byte bound, and creates the grounded versioned prompt.
+3. `BedrockClient` loads model configuration from environment variables and invokes the model through `bedrock-runtime.converse`.
+4. The client extracts model text and returns structured invocation metadata without exposing credentials or raw provider errors.
+5. The parser requires strict JSON and validates the exact executive-analysis schema.
+6. The service returns a typed `ExecutiveAnalysis` containing four impact strings and typed recommendations.
+
+Phase 4 does not send notifications, score risk, select models automatically, or alter deterministic diff evidence.
 
 ## End-to-End Data Flow
 

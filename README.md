@@ -2,7 +2,7 @@
 
 DriftMind is an autonomous, AI-powered infrastructure intelligence agent for AWS. It is being developed for the AWS Builder Center **Always-On Agent Weekend Challenge**.
 
-> **Project status:** Phase 3 — Infrastructure Snapshot Engine and deterministic Infrastructure Diff Engine implemented and covered by unit tests. No Bedrock, SES, AI prompts, risk scoring, notifications, EventBridge deployment, or infrastructure as code is included.
+> **Project status:** Phase 4 — snapshot collection, deterministic infrastructure diffing, and the Amazon Bedrock Intelligence Engine are implemented and covered by unit tests. SES, email delivery, risk scoring, notifications, EventBridge deployment, and infrastructure as code are not included.
 
 ## Phase 2: Infrastructure Snapshot Engine
 
@@ -16,13 +16,24 @@ The diff engine strictly loads previous and current schema `1.0` snapshots from 
 
 Reports contain exactly `summary` and `changes`. Each change contains `change_id`, `change_type`, `resource_type`, `logical_name`, `field`, `old`, and `new`. IDs such as `CHG-0001` are assigned after deterministic ordering. Added and removed resources use `field: null`; modified fields use dotted property paths such as `tags.Environment`. The report contains no generated prose.
 
+## Phase 4: Amazon Bedrock Intelligence Engine
+
+The intelligence service accepts a validated Phase 3 report, builds a deterministic prompt, invokes Amazon Bedrock through the Runtime Converse API, strictly parses the returned JSON, and returns a typed `ExecutiveAnalysis`. The prompt identifies DriftMind and the analyst role, embeds only the supplied report, rejects reports larger than 100,000 UTF-8 bytes, prohibits invented infrastructure and speculation, and requires conclusions and review actions to remain grounded in change IDs.
+
+Bedrock configuration comes only from environment variables:
+
+- Required: `AWS_REGION`, `BEDROCK_MODEL_ID`
+- Optional: `BEDROCK_TEMPERATURE` (default `0.0`), `BEDROCK_MAX_TOKENS` (default `1024`)
+
+No model ID is hardcoded. The response must be one JSON object containing exactly `summary`, `security_impact`, `operational_impact`, `cost_impact`, and `recommendations`. Markdown, surrounding prose, missing or extra fields, duplicate fields, invalid types, and malformed JSON are rejected. API failures are wrapped without returning or logging provider exception details.
+
 Run the complete unit suite from the repository root:
 
 ```shell
 python -m unittest discover -s tests -v
 ```
 
-Tests use local files and injected AWS clients; they make no AWS calls.
+Bedrock and S3 are fully mocked or injected in tests; the suite makes no AWS calls.
 
 ## Project Overview
 
