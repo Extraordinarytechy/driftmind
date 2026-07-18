@@ -29,7 +29,7 @@ Amazon S3 stores immutable JSON snapshots. The Phase 2 storage adapter writes UT
 
 ### Diff Engine
 
-The diff engine compares compatible normalized snapshots. It uses stable resource identities and canonical ordering to identify additions, removals, and attribute modifications. It is a pure deterministic component: equal inputs produce equal outputs.
+The implemented Phase 3 engine is a pure, deterministic Python component. It compares resources by the case-sensitive identity `(resource_type, logical_name)`, emits one entry for each added or removed resource, and recursively compares every property of identities present in both snapshots. Dictionary properties produce dotted field paths; lists are ordered values and are reported as one field when changed. Unchanged resources and properties are omitted.
 
 ### Intelligence Layer
 
@@ -53,6 +53,19 @@ Amazon CloudWatch receives structured logs, service metrics, and alarms. Logs co
 6. The storage adapter conditionally uploads the object to `snapshots/YYYY/MM/DD/snapshot-<timestamp>.json`.
 7. The handler returns a structured result containing snapshot identity, resource count, and S3 location. Failures are logged and returned as structured errors.
 
+## Implemented Phase 3 Data Flow
+
+1. The local loader reads the previous and current UTF-8 JSON files.
+2. It requires the exact Phase 2 snapshot and resource fields, reconstructs the existing dataclass models, and validates both snapshots.
+3. The comparator requires matching `schema_version`, `provider`, and `environment` values.
+4. It indexes resources by `(resource_type, logical_name)` and detects additions and removals.
+5. It recursively compares properties for shared resource identities and ignores unchanged values.
+6. It orders added entries first, removed entries second, and modified entries last; each category is ordered by resource identity and modified field path.
+7. Stable sequential IDs are assigned as `CHG-0001`, `CHG-0002`, and so on.
+8. The report serializer emits deterministic UTF-8 JSON containing no natural-language summary.
+
+Phase 3 loads explicit local files only. It does not scan S3 history or choose a previous snapshot.
+
 ## End-to-End Data Flow
 
 1. EventBridge invokes Lambda with schedule and invocation metadata.
@@ -71,7 +84,9 @@ Amazon CloudWatch receives structured logs, service metrics, and alarms. Logs co
 
 The implemented schema `1.0` snapshot contains exactly five top-level fields: `schema_version`, `generated_at`, `provider`, `environment`, and `resources`. Each resource contains `resource_type`, `logical_name`, and `properties`. Resource identity is the pair of type and logical name; duplicate identities are invalid. Resources and nested property keys are serialized in canonical order.
 
-`generated_at` is a timezone-aware UTC ISO 8601 timestamp. The same timestamp determines the immutable object key: `snapshots/YYYY/MM/DD/snapshot-<timestamp>.json`. Phase 2 adds no baseline, diff, model, or delivery metadata to the snapshot contract.
+`generated_at` is a timezone-aware UTC ISO 8601 timestamp. The same timestamp determines the immutable object key: `snapshots/YYYY/MM/DD/snapshot-<timestamp>.json`.
+
+The Phase 3 report contains exactly `summary` and `changes`. `summary` contains numeric `total_changes`, `added`, `removed`, and `modified` counts; modified counts property-level entries. Every change contains exactly `change_id`, `change_type`, `resource_type`, `logical_name`, `field`, `old`, and `new`. Added resources use `old: null`, removed resources use `new: null`, and both use `field: null`; their non-null side contains the complete properties object. Modified entries contain a dotted property path and the field's before/after values. An unchanged comparison has zero counts and an empty `changes` array.
 
 ## Failure and Consistency Model
 

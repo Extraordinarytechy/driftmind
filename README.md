@@ -2,21 +2,27 @@
 
 DriftMind is an autonomous, AI-powered infrastructure intelligence agent for AWS. It is being developed for the AWS Builder Center **Always-On Agent Weekend Challenge**.
 
-> **Project status:** Phase 2 — Infrastructure Snapshot Engine implemented and covered by unit tests. No infrastructure diffing, Bedrock, SES, EventBridge deployment, or infrastructure as code is included.
+> **Project status:** Phase 3 — Infrastructure Snapshot Engine and deterministic Infrastructure Diff Engine implemented and covered by unit tests. No Bedrock, SES, AI prompts, risk scoring, notifications, EventBridge deployment, or infrastructure as code is included.
 
 ## Phase 2: Infrastructure Snapshot Engine
 
-The executable pipeline loads configuration from `SNAPSHOT_BUCKET`, `AWS_REGION`, and `PROVIDER`; loads the configured provider; generates and validates a schema `1.0` snapshot; serializes deterministic JSON; and uploads it to Amazon S3. Phase 2 implements only `DemoProvider`, which returns deterministic EC2 instance, security group, and S3 bucket models without calling AWS APIs. `AWSProvider` is an explicit future placeholder.
+The executable snapshot pipeline loads configuration from `SNAPSHOT_BUCKET`, `AWS_REGION`, and `PROVIDER`; loads the configured provider; generates and validates a schema `1.0` snapshot; serializes deterministic JSON; and uploads it to Amazon S3. Phase 2 implements only `DemoProvider`, which returns deterministic EC2 instance, security group, and S3 bucket models without calling AWS APIs. `AWSProvider` remains the explicit future provider placeholder.
 
 Snapshots contain exactly `schema_version`, `generated_at`, `provider`, `environment`, and `resources`. Objects are written with server-side AES256 encryption and a conditional create to `snapshots/YYYY/MM/DD/snapshot-<timestamp>.json`.
 
-Run the complete unit suite, including local Lambda pipeline execution with mocked S3, from the repository root:
+## Phase 3: Infrastructure Diff Engine
+
+The diff engine strictly loads previous and current schema `1.0` snapshots from local UTF-8 JSON files, validates them through the Phase 2 models, and requires matching schema version, provider, and environment. It detects added and removed resources by `(resource_type, logical_name)` identity and recursively detects modified properties. Unchanged resources and properties are omitted.
+
+Reports contain exactly `summary` and `changes`. Each change contains `change_id`, `change_type`, `resource_type`, `logical_name`, `field`, `old`, and `new`. IDs such as `CHG-0001` are assigned after deterministic ordering. Added and removed resources use `field: null`; modified fields use dotted property paths such as `tags.Environment`. The report contains no generated prose.
+
+Run the complete unit suite from the repository root:
 
 ```shell
 python -m unittest discover -s tests -v
 ```
 
-The actual Lambda runtime receives `boto3` from the Python 3.12 AWS Lambda runtime. Unit tests inject an S3 client and never make AWS calls.
+Tests use local files and injected AWS clients; they make no AWS calls.
 
 ## Project Overview
 
