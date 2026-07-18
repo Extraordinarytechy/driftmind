@@ -41,7 +41,20 @@ Model output must be strict JSON with exactly `summary`, `security_impact`, `ope
 
 ### Report Delivery
 
-The reporting component combines deterministic counts with validated Bedrock analysis and sends a plain, accessible executive summary through Amazon SES. Delivery status is recorded against the run identifier. Recipient configuration remains external to source control.
+The implemented Phase 5 notification service accepts a validated `ExecutiveAnalysis`, captures an injectable UTC generation timestamp, formats matching HTML and plain-text reports, and sends them through Amazon SES. Both formats contain the title, generation timestamp, executive summary, security impact, operational impact, cost impact, recommendations, and footer. All model-provided HTML content is escaped; the document uses simple semantic HTML with no external CSS or JavaScript.
+
+`AWS_REGION`, `SES_SENDER`, and `SES_RECIPIENT` are required environment variables. The SES adapter creates a deterministic MIME `multipart/alternative` message with UTF-8 text and HTML parts and calls `send_raw_email`. It returns a validated `NotificationResult` containing `status: sent` and the SES message ID. Logs include only Region, body sizes, recipient count, message ID, lifecycle status, and sanitized error type; addresses, report content, credentials, and raw provider errors are not logged.
+
+## Implemented Phase 5 Data Flow
+
+1. `NotificationService` receives a validated `ExecutiveAnalysis` and obtains an aware UTC timestamp from its clock.
+2. The formatter creates deterministic plain-text and escaped HTML alternatives and wraps them in a validated `NotificationRequest`.
+3. `SESEmailClient` loads Region, sender, and one recipient from environment variables.
+4. The adapter generates a UTF-8 `multipart/alternative` MIME message with a content-derived deterministic boundary.
+5. SES receives the raw message through `send_raw_email`.
+6. A successful response becomes a typed `NotificationResult`; missing message IDs and provider failures raise sanitized delivery exceptions.
+
+Phase 5 does not implement delivery retries, retry queues, persisted idempotency, CloudWatch alarms, scheduling, SMS, SNS, Slack, or Teams.
 
 ### Observability
 

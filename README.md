@@ -2,7 +2,7 @@
 
 DriftMind is an autonomous, AI-powered infrastructure intelligence agent for AWS. It is being developed for the AWS Builder Center **Always-On Agent Weekend Challenge**.
 
-> **Project status:** Phase 4 — snapshot collection, deterministic infrastructure diffing, and the Amazon Bedrock Intelligence Engine are implemented and covered by unit tests. SES, email delivery, risk scoring, notifications, EventBridge deployment, and infrastructure as code are not included.
+> **Project status:** Phase 5 — snapshot collection, deterministic infrastructure diffing, Bedrock intelligence, and SES notification reporting are implemented and covered by unit tests. EventBridge scheduling, retry queues, CloudWatch alarms, infrastructure as code, and alternate notification channels are not included.
 
 ## Phase 2: Infrastructure Snapshot Engine
 
@@ -26,6 +26,18 @@ Bedrock configuration comes only from environment variables:
 - Optional: `BEDROCK_TEMPERATURE` (default `0.0`), `BEDROCK_MAX_TOKENS` (default `1024`)
 
 No model ID is hardcoded. The response must be one JSON object containing exactly `summary`, `security_impact`, `operational_impact`, `cost_impact`, and `recommendations`. Markdown, surrounding prose, missing or extra fields, duplicate fields, invalid types, and malformed JSON are rejected. API failures are wrapped without returning or logging provider exception details.
+
+## Phase 5: Notification & Reporting Engine
+
+`NotificationService` converts a validated `ExecutiveAnalysis` into matching HTML and plain-text reports using an injectable UTC generation timestamp. Reports include the title, timestamp, executive summary, security, operational and cost impacts, recommendations, and footer. HTML model content is escaped, and no external CSS or JavaScript is used.
+
+SES configuration comes only from required environment variables:
+
+- `AWS_REGION`
+- `SES_SENDER`
+- `SES_RECIPIENT`
+
+The SES adapter validates plain email addresses, creates an explicit UTF-8 `multipart/alternative` message, and sends it through `send_raw_email`. Successful delivery returns a typed result containing the SES message ID and `sent` status. Provider failures are sanitized, and recipient addresses, report bodies, credentials, and raw provider errors are not logged.
 
 Run the complete unit suite from the repository root:
 
