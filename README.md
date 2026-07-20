@@ -1,14 +1,26 @@
 # DriftMind
 
+![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![AWS](https://img.shields.io/badge/AWS-Lambda%20%7C%20S3%20%7C%20Bedrock%20%7C%20SES-FF9900?logo=amazonaws&logoColor=white)
+![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)
+
 DriftMind is an AI-powered infrastructure intelligence agent for AWS. It creates versioned snapshots, loads the latest previous snapshot from Amazon S3, produces deterministic drift evidence, conditionally asks Amazon Bedrock for structured risk analysis, stores a frontend-ready report, and sends drift-only notifications through Amazon SES.
 
 > **Status:** Autonomous Lambda pipeline and read-only AWS discovery are implemented and unit tested. Snapshot collection, S3 baseline discovery, deterministic diffing, cost-aware decisions, Bedrock analysis, report storage, and conditional SES delivery are connected. EventBridge and infrastructure-as-code provisioning remain external deployment work.
+
+## Links
+
+- 🌐 Live Demo: https://d1wyryu1twvwy.cloudfront.net/
+- 💻 GitHub: https://github.com/Extraordinarytechy/driftmind
+- 📖 AWS Builder Center Article: https://builder.aws.com/content/3GmFtvchWqUUzp0UP7NXyrp5KKb/weekend-agent-challenge-driftmind-an-autonomous-ai-infrastructure-drift-detection-agent
 
 ## Project Overview
 
 DriftMind is designed to help teams understand infrastructure drift without manually reviewing raw configuration documents. Its deterministic pipeline identifies exactly what was added, removed, or modified before any generative model is invoked. Amazon Bedrock receives only that validated change report, and its response must satisfy a strict JSON contract before it can be formatted and delivered.
 
 Collection can use the deterministic `DemoProvider` or the read-only `AWSProvider`, which discovers Lambda, S3, IAM, DynamoDB, CloudWatch alarm, EventBridge rule, SNS, and SQS configuration. Both feed the same snapshot schema and autonomous pipeline. The repository does not provision an EventBridge schedule or other infrastructure.
+
+![DriftMind dashboard](architecture/dashboard.png)
 
 ## Problem Statement
 
@@ -164,7 +176,7 @@ driftmind/
 DriftMind targets **Python 3.12**. Run backend commands from the backend project directory:
 
 ```shell
-git clone <repository-url>
+git clone https://github.com/Extraordinarytechy/driftmind.git
 cd driftmind/backend
 python -m venv .venv
 ```
@@ -318,7 +330,7 @@ SES is never constructed or invoked for baseline and healthy runs. Retries, pers
 
 ## Project Background
 
-DriftMind was originally developed for the AWS Builder Center **Always-On Agent Weekend Challenge**. The repository is structured as an open-source foundation for further infrastructure intelligence work rather than as a challenge-specific demo.
+DriftMind was originally developed for the AWS Builder Center **Weekend Agent Challenge**. The repository is structured as an open-source foundation for further infrastructure intelligence work rather than as a challenge-specific demo.
 
 ## Contributing
 
