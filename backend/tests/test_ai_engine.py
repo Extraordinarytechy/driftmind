@@ -145,6 +145,32 @@ class BedrockClientTests(unittest.TestCase):
         self.assertNotIn("secret material", str(raised.exception))
         self.assertIsNone(raised.exception.__cause__)
 
+    def test_aws_validation_failure_logs_full_error_details(self) -> None:
+        validation_error_type = type("ValidationException", (Exception,), {})
+        validation_error = validation_error_type("provider exception text")
+        validation_error.response = {
+            "Error": {
+                "Code": "ValidationException",
+                "Message": "Full AWS validation message for diagnostics",
+            }
+        }
+        runtime_client = Mock()
+        runtime_client.converse.side_effect = validation_error
+        client = BedrockClient(environ=BEDROCK_ENV, runtime_client=runtime_client)
+
+        with self.assertLogs("lambda.ai.client", level="ERROR") as logs:
+            with self.assertRaisesRegex(
+                BedrockInvocationError, "Bedrock model invocation failed"
+            ) as raised:
+                client.invoke("prompt")
+
+        output = "\n".join(logs.output)
+        self.assertIn("aws_error_code=ValidationException", output)
+        self.assertIn(
+            "aws_error_message=Full AWS validation message for diagnostics", output
+        )
+        self.assertIsNone(raised.exception.__cause__)
+
 
 class IntelligenceServiceTests(unittest.TestCase):
     def test_service_orchestrates_prompt_invocation_and_parsing(self) -> None:

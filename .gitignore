@@ -22,6 +22,8 @@ dist/
 .env
 .env.*
 !.env.example
+!frontend/.env.development
+!frontend/.env.production
 *.pem
 *.key
 
@@ -37,9 +39,24 @@ cdk.out/
 .sam-cache/
 
 # Generated local artifacts; preserve tracked directory markers
-snapshots/*
-!snapshots/.gitkeep
-sample_data/generated/
+backend/snapshots/*
+!backend/snapshots/.gitkeep
+backend/sample_data/generated/
 *.log
 article/
 .env.example
+
+# Local deployment evidence (Builder Center)
+evidence/
+screenshots/
+recordings/
+demo/*.cast
+
+# Frontend dependencies and Vite output
+node_modules/
+frontend-dist/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*

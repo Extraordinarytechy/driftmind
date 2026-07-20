@@ -170,6 +170,10 @@ class LambdaPipelineTests(unittest.TestCase):
         app = importlib.import_module("lambda.app")
         mock_module = importlib.import_module("unittest.mock")
         s3_client = Mock()
+        s3_client.list_objects_v2.return_value = {
+            "Contents": [],
+            "IsTruncated": False,
+        }
         environment = {
             "SNAPSHOT_BUCKET": "local-snapshots",
             "AWS_REGION": "us-east-1",
@@ -189,7 +193,58 @@ class LambdaPipelineTests(unittest.TestCase):
         self.assertEqual(response["status"], "success")
         self.assertEqual(response["resource_count"], 3)
         self.assertEqual(response["s3"]["bucket"], "local-snapshots")
-        s3_client.put_object.assert_called_once()
+        self.assertEqual(response["pipeline_status"], "BASELINE_CREATED")
+        self.assertFalse(response["bedrock_invoked"])
+        self.assertFalse(response["ses_sent"])
+        self.assertEqual(s3_client.put_object.call_count, 3)
+        uploaded_keys = [
+            call.kwargs["Key"] for call in s3_client.put_object.call_args_list
+        ]
+        self.assertTrue(uploaded_keys[0].startswith("snapshots/"))
+        self.assertTrue(uploaded_keys[1].startswith("reports/2026/"))
+        self.assertEqual(uploaded_keys[2], "reports/latest.json")
+        historical = s3_client.put_object.call_args_list[1].kwargs
+        latest = s3_client.put_object.call_args_list[2].kwargs
+        self.assertEqual(latest["Body"], historical["Body"])
+        self.assertNotIn("IfNoneMatch", latest)
+        self.assertEqual(latest["CacheControl"], "no-cache, max-age=0")
+
+    def test_latest_report_failure_does_not_fail_completed_pipeline(self) -> None:
+        app = importlib.import_module("lambda.app")
+        mock_module = importlib.import_module("unittest.mock")
+        s3_client = Mock()
+        s3_client.list_objects_v2.return_value = {
+            "Contents": [],
+            "IsTruncated": False,
+        }
+        s3_client.put_object.side_effect = [
+            {"ETag": "snapshot"},
+            {"ETag": "historical-report"},
+            RuntimeError("raw latest write failure"),
+        ]
+        environment = {
+            "SNAPSHOT_BUCKET": "local-snapshots",
+            "AWS_REGION": "us-east-1",
+            "PROVIDER": "demo",
+        }
+
+        with (
+            mock_module.patch.dict("os.environ", environment, clear=True),
+            mock_module.patch.object(
+                app.SnapshotStorage,
+                "_create_s3_client",
+                return_value=s3_client,
+            ),
+            self.assertLogs("lambda.agent.storage", level="ERROR") as captured,
+        ):
+            response = app.lambda_handler({}, None)
+
+        self.assertEqual(response["status"], "success")
+        self.assertEqual(response["pipeline_status"], "BASELINE_CREATED")
+        self.assertEqual(s3_client.put_object.call_count, 3)
+        log_output = "\n".join(captured.output)
+        self.assertIn("Latest report update failed", log_output)
+        self.assertNotIn("raw latest write failure", log_output)
 
     def test_lambda_handler_returns_structured_configuration_error(self) -> None:
         app = importlib.import_module("lambda.app")

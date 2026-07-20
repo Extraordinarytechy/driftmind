@@ -1,115 +1,43 @@
 # DriftMind Development Plan
 
-Development is incremental. Each phase must preserve deterministic behavior, traceability, least-privilege access, and Python 3.12 compatibility. Application phases will use `boto3`; infrastructure-as-code choices are intentionally outside Phase 1.
+Development is incremental. Each phase preserves deterministic behavior, explicit contracts, least-privilege boundaries, Python 3.12 compatibility, and fully mocked AWS unit tests.
 
 ## Phase 1 — Repository
-
-**Goal:** Establish a stable, professional open-source project foundation.
-
-**Inputs:** Product vision, challenge requirements, architectural assumptions, and coding standards.
-
-**Outputs:** Agreed scope, architecture, service rationale, phased delivery plan, and article outline.
-
-**Deliverables:**
-- Repository structure and ignore rules
-- README, Apache 2.0 license, and dependency manifest
-- Project specification, development plan, AWS service rationale, and architecture document
-- AWS Builder Center article skeleton
-- Empty tracked directories for future code and artifacts
+**Status:** Completed.
+Established the repository structure, Apache 2.0 license, dependency manifest, project documentation, security guidance, contribution guidance, and release metadata.
 
 ## Phase 2 — Infrastructure Snapshot Engine
-
 **Status:** Completed.
+Delivered schema `1.0` snapshot/resource models, UTC and JSON-value validation, canonical serialization, deterministic `DemoProvider`, the provider abstraction, and immutable S3 writes under `snapshots/` with AES256 and conditional creation.
 
-**Goal:** Produce a deterministic, normalized, schema-validated snapshot and persist it to an externally provisioned S3 bucket.
-
-**Inputs:** `SNAPSHOT_BUCKET`, `AWS_REGION`, and `PROVIDER` environment variables; schema version `1.0`; and the deterministic demo resource inventory.
-
-**Outputs:** UTF-8 JSON containing exactly `schema_version`, `generated_at`, `provider`, `environment`, and `resources`, stored at `snapshots/YYYY/MM/DD/snapshot-<timestamp>.json`.
-
-**Delivered:**
-- Python 3.12 provider interface and deterministic `DemoProvider`
-- Explicit unimplemented `AWSProvider` boundary with no AWS resource API calls
-- Dataclass snapshot and resource models with UTC, identity, and JSON-value validation
-- Canonical resource/property ordering and deterministic serialization
-- Environment-only configuration and cohesive collector/storage boundaries
-- S3 upload through `boto3`, AES256 server-side encryption, and conditional object creation
-- Structured logging for provider loading, generation, validation, upload, and failures
-- Unit coverage for models, provider behavior, collection, serialization, mocked S3 upload, and local pipeline execution
-
-## Phase 3 — Diff Engine
-
-**Goal:** Compare compatible snapshots and emit a deterministic, machine-readable change set.
-
-**Inputs:** Current snapshot, latest valid baseline, identity rules, and ignored-field policy.
-
-**Outputs:** Added, removed, and modified resources with before/after evidence and summary counts.
-
-**Deliverables:**
-- Baseline discovery and schema compatibility checks
-- Pure comparison engine independent of Bedrock
-- First-run and no-change behavior
-- Size limits and deterministic diff serialization
-- Focused tests for identity, ordering, and edge cases
+## Phase 3 — Deterministic Diff Engine
+**Status:** Completed.
+Delivered strict snapshot parsing, schema/provider/environment compatibility checks, deterministic added/removed/modified detection, dotted nested-property paths, ordered-list semantics, stable `CHG-####` identifiers, canonical reports, and local-file loading.
 
 ## Phase 4 — Bedrock Intelligence
-
 **Status:** Completed.
+Delivered the Bedrock Runtime Converse client, bounded grounded prompts, sanitized provider failures, and strict typed parsing. The reusable executive-analysis API remains supported; the autonomous drift path adds the exact fields `executive_summary`, `change_explanation`, `potential_impact`, `risk_level`, and `recommendations`, with risk restricted to `Low`, `Medium`, `High`, or `Critical`.
 
-**Goal:** Turn a validated structured diff into a grounded, typed executive analysis through Amazon Bedrock.
-
-**Inputs:** A validated Phase 3 `ChangeReport`; prompt version `1.0`; required `AWS_REGION` and `BEDROCK_MODEL_ID`; optional validated temperature and token settings; and the strict response schema.
-
-**Outputs:** `ExecutiveAnalysis` with `summary`, `security_impact`, `operational_impact`, `cost_impact`, and typed `recommendations`.
-
-**Delivered:**
-- Deterministic prompt builder containing agent identity, project purpose, delimited diff evidence, grounding rules, and exact JSON output schema
-- Fixed 100,000-byte input bound that rejects oversized reports without corrupting deterministic evidence
-- Environment-only Bedrock Runtime Converse client with explicit model, temperature, and maximum-token settings
-- Structured invocation response metadata and failure wrapping that omits provider details and credentials
-- Strict JSON parser rejecting malformed/nonstandard JSON, duplicate/missing/extra fields, invalid field types, and invalid recommendations
-- Frozen dataclass models for executive analysis and recommendations
-- Cohesive service orchestration with lifecycle and failure logging
-- Fully mocked tests for prompt determinism, parser success/failures, model invocation/failure, and service orchestration
-
-## Phase 5 — Email Reporting
-
+## Phase 5 — Notification and Reporting
 **Status:** Completed.
+Delivered deterministic escaped HTML/plain-text formatting, UTF-8 `multipart/alternative` MIME, SES address validation, typed delivery results, sanitized failures, and a drift-specific alert containing deterministic changes, risk, AI explanation, impact, and recommendations.
 
-**Goal:** Convert validated executive analysis into accessible HTML and plain-text reports and deliver them through Amazon SES.
+## Phase 6 — Autonomous Watcher Orchestration
+**Status:** Completed.
+Delivered paginated S3 discovery of the latest older canonical snapshot, first-run baseline behavior, deterministic `BASELINE_CREATED`/`HEALTHY`/`DRIFT_DETECTED` decisions, mandatory Bedrock and SES no-drift skips, drift-only analysis and delivery, and stable reports under `reports/YYYY/MM/DD/` for read-only consumers. Bedrock and SES failures persist available drift evidence before propagating. The Lambda response preserves all original snapshot fields and adds autonomous metadata. Unit coverage includes baseline, unchanged, combined drift, pagination, service gating, report generation, invalid risk, and downstream failures.
 
-**Inputs:** A validated `ExecutiveAnalysis`; an aware generation timestamp; and required `AWS_REGION`, `SES_SENDER`, and `SES_RECIPIENT` environment variables.
+## Phase 7 — Release and Deployment Readiness
+**Status:** Completed for repository artifacts.
+Delivered the professional README, architecture assets, Builder Center article, CI workflow, security and contribution policies, changelog, and deterministic Lambda ZIP build/import validation. The build includes repository modules at ZIP root and all autonomous packages.
 
-**Outputs:** A validated `NotificationRequest`, a UTF-8 `multipart/alternative` message, and a `NotificationResult` containing the SES message ID and `sent` status.
+## Phase 8 — Production AWSProvider
+**Status:** Completed.
+Delivered one shared boto3 session, STS-derived account/Region identity, and isolated read-only collectors for Lambda, S3, IAM, DynamoDB, CloudWatch alarms, EventBridge rules, SNS, and SQS. Collectors paginate where supported, normalize stable fields into the unchanged snapshot schema, sort deterministically, redact provider failures, and use no mutation APIs. Mocked tests cover successful and empty discovery, pagination, API failures, partial service failures, schema validation, stable ordering, aggregation, and `DemoProvider` compatibility.
 
-**Delivered:**
-- Deterministic plain-text and semantic HTML formatters with matching report sections
-- Correct escaping of all model-provided HTML content and no external CSS or JavaScript
-- Frozen typed models for formatted notification requests and successful delivery results
-- Environment-only SES configuration with plain-address and header-injection validation
-- Deterministic MIME multipart generation containing text and HTML alternatives
-- Lazy `boto3` SES client creation and `send_raw_email` delivery
-- Sanitized provider failure handling with no raw provider exception chain
-- Cohesive formatting-to-delivery service orchestration and lifecycle logging
-- Fully mocked tests for both formats, SES success/failure, MIME structure, and service orchestration
-
-Persisted idempotency, retries, retry queues, CloudWatch alarms, scheduling, and alternate notification channels are not implemented in this phase.
-
-## Phase 6 — Documentation
-
-**Goal:** Publish accurate project, deployment, operations, security, and challenge documentation based only on validated behavior.
-
-**Inputs:** Completed implementation, architecture decisions, tests, deployment procedure, operational evidence, cost observations, and real screenshots where useful.
-
-**Outputs:** Release-ready open-source documentation and a completed AWS Builder Center article.
-
-**Deliverables:**
-- Updated README and architecture diagram
-- Deployment, configuration, security, operations, and troubleshooting guides
-- Supported-resource and known-limitation documentation
-- Contribution guidance and release notes
-- Completed Builder Center article with verified results and authentic screenshots
+## Remaining Deployment Work
+- Provision EventBridge, IAM, S3 controls, Lambda settings, Bedrock access, SES identities, and CloudWatch alarms through infrastructure as code.
+- Define bounded retries, delivery idempotency, concurrency handling, and baseline-promotion policy.
+- Add deployed integration evidence, retention policy, metrics, alarms, and multi-account/Region support.
 
 ## Phase Completion Policy
-
-A phase is complete when its deliverables are reviewed, relevant automated checks pass, failure behavior is documented, and downstream phases can rely on its output contract. Generated examples, screenshots, metrics, or claims must not be presented as real before they are produced by the implemented system.
+A phase is complete when its deliverables are reviewed, relevant checks pass, failure behavior is documented, and downstream phases can rely on its contracts. Repository status must not imply that externally provisioned infrastructure or mature operational controls are included.

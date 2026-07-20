@@ -1,99 +1,48 @@
 # DriftMind Project Specification
 
+## Purpose and Status
+DriftMind detects infrastructure drift with deterministic code and uses generative AI only to interpret validated change evidence. The autonomous Python 3.12 Lambda pipeline and read-only `AWSProvider` are implemented and unit tested with mocked AWS clients. EventBridge and infrastructure-as-code provisioning remain external; collection can use deterministic demo resources or live AWS discovery across eight services.
+
 ## Goals
-
-- Detect meaningful changes in supported AWS infrastructure on a recurring schedule.
-- Convert deterministic infrastructure differences into clear, grounded explanations.
-- Assess likely operational impact and identify items that warrant human review.
-- Deliver a concise executive summary without requiring an operator to initiate each run.
-- Provide an auditable history of snapshots, diffs, analyses, and delivery outcomes.
-
-## Scope
-
-The initial product covers one configured AWS account and Region per deployment. It collects an explicitly supported set of resource metadata, normalizes and stores snapshots, compares consecutive successful snapshots, invokes Amazon Bedrock with the structured diff, and emails a report through Amazon SES. It also emits operational telemetry to Amazon CloudWatch.
+- Produce immutable, schema-validated snapshots and deterministic added/removed/modified evidence.
+- Avoid Bedrock and SES cost when no drift exists.
+- Convert drift into strict risk analysis and a concise, evidence-linked alert.
+- Store a stable per-run report for future read-only dashboards.
+- Keep observed infrastructure read-only and application logs free of credentials, report bodies, model output, and recipient addresses.
 
 ## Non-Goals
+DriftMind does not replace AWS Config, CloudTrail, security scanners, or incident response; remediate or approve changes; infer intent without evidence; provide real-time event processing; add authentication or administration; or make compliance, legal, security, or financial determinations.
 
-- Replacing AWS Config, AWS CloudTrail, security scanners, or incident-response platforms
-- Applying changes, remediating resources, or approving deployments
-- Inferring intent when evidence is unavailable
-- Providing real-time event processing in the initial release
-- Supporting every AWS service or multi-cloud environment in the initial release
-- Making compliance, legal, security, or financial determinations
+## Implemented Functional Requirements
+1. **Snapshot storage:** Store each validated current snapshot immutably under its canonical `snapshots/` key.
+2. **Baseline discovery:** Paginate S3 and select the latest canonical snapshot key strictly older than the current key; validate its payload and let the comparator enforce compatibility.
+3. **Diffing:** Deterministically identify added, removed, and property-level modified resources with stable IDs.
+4. **First run:** Store a `BASELINE_CREATED` report without fabricated changes, Bedrock, or SES.
+5. **Healthy run:** Store a `HEALTHY` report and skip Bedrock and SES when the diff is empty.
+6. **Intelligence:** For drift only, send a bounded structured diff to Bedrock and require strict summary, explanation, impact, risk, and recommendation fields.
+7. **Reporting:** Store schema `1.0` reports under `reports/` with health, resources scanned, grouped evidence, risk/AI fields, snapshot keys, delivery state, and an activity timeline.
+8. **Delivery:** Send escaped UTF-8 multipart SES alerts only after drift receives valid analysis.
+9. **Failure evidence:** Persist available drift evidence on Bedrock or SES failure before returning a sanitized Lambda error.
+10. **Compatibility:** Preserve existing snapshot serialization, key behavior, deterministic diff contracts, reusable analysis/notification APIs, and Lambda success fields.
+11. **Live discovery:** With `PROVIDER=aws`, use read-only, paginated service collectors for Lambda, S3, IAM, DynamoDB, CloudWatch alarms, EventBridge rules, SNS, and SQS; isolate failures and normalize resources into the unchanged snapshot schema.
 
-## Functional Requirements
+## Target Requirements Not Yet Delivered
+- A configurable EventBridge schedule and infrastructure-as-code deployment.
+- Completeness markers and explicit resource caps for large or partially visible AWS inventories.
+- Explicit bounded retries, persistent idempotency, overlapping-run control, and successful-baseline promotion state.
+- CloudWatch custom metrics, dashboards, alarms, correlation IDs, and per-stage durations.
+- Configurable retention, multi-account/Region collection, and additional resource types.
 
-1. **FR-1 Scheduling:** A configurable EventBridge schedule starts the workflow.
-2. **FR-2 Collection:** The system queries supported AWS APIs through `boto3` using read-only permissions.
-3. **FR-3 Normalization:** Volatile and irrelevant fields are removed before comparison.
-4. **FR-4 Snapshot storage:** Each successful snapshot is stored immutably in S3 with schema and run metadata.
-5. **FR-5 Baseline selection:** The latest compatible successful snapshot is selected as the baseline.
-6. **FR-6 Diffing:** Added, removed, and modified resources and attributes are identified deterministically.
-7. **FR-7 First run:** A run without a baseline stores the snapshot and reports baseline creation without inventing changes.
-8. **FR-8 Intelligence:** A bounded structured diff is sent to Bedrock with instructions to remain grounded in supplied evidence.
-9. **FR-9 Reporting:** A human-readable executive summary includes detected changes, impact, limitations, and suggested review actions.
-10. **FR-10 Delivery:** Reports are sent to configured, verified recipients through SES.
-11. **FR-11 Observability:** Run status, duration, counts, failures, and delivery outcomes are observable in CloudWatch.
-12. **FR-12 Traceability:** Artifacts share stable run identifiers and schema versions.
+## Implemented Data Flow
+1. Lambda collects and validates the current snapshot, then conditionally stores it in S3.
+2. S3 history discovery loads the latest older canonical snapshot or reports that no baseline exists.
+3. The comparator always runs when a previous snapshot exists; the decision engine selects baseline, healthy, or drift state.
+4. Baseline and healthy states store a report and finish without Bedrock or SES.
+5. Drift invokes Bedrock, validates `Low|Medium|High|Critical` risk analysis, sends one SES alert, and stores the final report.
+6. Bedrock or SES failure stores the best available drift report and re-raises to the sanitized Lambda boundary.
 
-## Non-Functional Requirements
+## Contracts and Quality Attributes
+Snapshots, changes, analyses, notifications, and reports are validated typed values. Serialization and change ordering are deterministic. S3 writes use AES256 and `If-None-Match: *`. Model input is bounded; malformed model output fails closed. Reports are the source of truth for read-only consumers and never trigger execution. Unit tests inject S3, Bedrock Runtime, and SES clients and make no live AWS calls.
 
-- **Runtime:** Application code will target Python 3.12 and use the AWS SDK for Python (`boto3`).
-- **Security:** Use least-privilege IAM, encryption in transit and at rest, and no secrets in source control or logs.
-- **Reliability:** Retries must be bounded; partial collection must not silently replace a valid baseline.
-- **Idempotency:** Reprocessing a run identifier must not create inconsistent baseline state or duplicate reports.
-- **Performance:** A normal run must complete within configured Lambda timeout and service quotas.
-- **Maintainability:** Collectors, diffing, model interaction, and delivery must have explicit interfaces and versioned contracts.
-- **Auditability:** Generated claims must be traceable to a run, diff, and stored source snapshot.
-- **Cost control:** Collection scope, storage retention, model input size, and invocation frequency must be configurable.
-- **Accessibility:** Email reports must be understandable without requiring access to raw JSON artifacts.
-
-## System Components
-
-1. **EventBridge schedule** — triggers recurring runs.
-2. **Lambda orchestrator** — validates configuration and coordinates the workflow.
-3. **Resource collectors** — retrieve allow-listed metadata from supported services.
-4. **Normalizer and validator** — create canonical snapshots and reject incomplete candidates.
-5. **S3 artifact store** — retain snapshots, diffs, and run metadata.
-6. **Diff engine** — calculate deterministic changes between compatible snapshots.
-7. **Bedrock intelligence adapter** — build bounded prompts, invoke the selected model, and validate responses.
-8. **Report formatter** — combine deterministic evidence and model analysis into an accessible report.
-9. **SES delivery adapter** — send reports and capture delivery outcomes.
-10. **CloudWatch observability** — centralize structured logs, metrics, and alarms.
-
-## Data Flow
-
-1. EventBridge starts a run with invocation metadata.
-2. Lambda validates configuration and establishes a correlation/run identifier.
-3. Collectors query supported AWS APIs with pagination and bounded retries.
-4. Responses are normalized, sorted, schema-validated, and marked complete or partial.
-5. A complete candidate snapshot is written to S3.
-6. The latest compatible complete snapshot is loaded as the baseline.
-7. The diff engine generates a structured change set; on first run, it records baseline creation instead.
-8. If changes exist, a bounded diff and approved context are submitted to Bedrock.
-9. The validated analysis and deterministic facts are rendered into a report.
-10. SES sends the report, and the run outcome is emitted to CloudWatch.
-11. The complete current snapshot becomes eligible for the next run's baseline.
-
-## Error Handling Strategy
-
-- Validate configuration and schemas before invoking downstream services.
-- Use AWS SDK retry behavior plus explicit bounded retries only for transient failures.
-- Treat authorization errors, malformed responses, incompatible schemas, and incomplete collection as non-retryable until corrected.
-- Never promote a partial or invalid snapshot to baseline status.
-- Preserve the last known valid baseline when a run fails.
-- Skip Bedrock on first-run baseline creation or when there is no change, according to final reporting policy.
-- If Bedrock fails or returns invalid output, send a deterministic fallback report when safe to do so and label the analysis unavailable.
-- Record SES delivery failures without reporting the run as fully successful; avoid unbounded duplicate sends.
-- Emit structured, correlated, redacted diagnostics and alarms for actionable failures.
-
-## Success Criteria
-
-- A scheduled run completes without manual initiation in the supported deployment scope.
-- Two known snapshots produce an exact, repeatable change set.
-- The first run establishes a baseline without claiming nonexistent changes.
-- The generated explanation contains no facts outside the provided evidence and clearly communicates uncertainty.
-- A verified recipient receives an accurate, readable summary for a successful run.
-- Failed or partial runs do not corrupt the valid baseline and are visible through CloudWatch.
-- Stored artifacts can reconstruct what was observed, compared, analyzed, and delivered for a run.
-- Documentation enables another developer to understand, deploy, operate, and extend the validated implementation.
+## Acceptance Criteria
+The existing snapshot pipeline remains compatible; baseline discovery and deterministic comparison work; baseline/healthy reports skip Bedrock and SES; drift reports include validated risk and recommendations; reports persist to S3; SES is drift-only; all tests pass; and the deployment ZIP imports `lambda.app.lambda_handler` with all autonomous modules included.

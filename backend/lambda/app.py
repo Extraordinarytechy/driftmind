@@ -11,6 +11,10 @@ from logger import configure_logging, get_logger
 from snapshot.collector import SnapshotCollector
 from storage import S3Client, SnapshotStorage
 
+from .agent.service import AutonomousPipeline, CollectorProtocol
+from .ai.client import BedrockRuntimeProtocol
+from .notification.email import SESClientProtocol
+
 configure_logging()
 LOGGER = get_logger(__name__)
 
@@ -19,33 +23,26 @@ def run_snapshot_pipeline(
     environ: Mapping[str, str] | None = None,
     s3_client: S3Client | None = None,
     clock: Callable[[], datetime] | None = None,
+    bedrock_runtime_client: BedrockRuntimeProtocol | None = None,
+    ses_client: SESClientProtocol | None = None,
+    collector: CollectorProtocol | None = None,
 ) -> dict[str, Any]:
-    """Execute the configured snapshot pipeline and return its result."""
+    """Execute the autonomous pipeline while preserving snapshot result fields."""
     config = Config.from_env(environ)
     LOGGER.info(
         "Configuration loaded provider=%s region=%s",
         config.provider,
         config.aws_region,
     )
-
-    collector = SnapshotCollector(provider_name=config.provider, clock=clock)
-    snapshot = collector.collect()
-    storage = SnapshotStorage(
-        bucket=config.snapshot_bucket,
-        region=config.aws_region,
+    return AutonomousPipeline(
+        config=config,
+        environ=environ,
         s3_client=s3_client,
-    )
-    key = storage.upload(snapshot)
-
-    return {
-        "status": "success",
-        "schema_version": snapshot.schema_version,
-        "generated_at": snapshot.generated_at,
-        "provider": snapshot.provider,
-        "environment": snapshot.environment,
-        "resource_count": len(snapshot.resources),
-        "s3": {"bucket": config.snapshot_bucket, "key": key},
-    }
+        bedrock_runtime_client=bedrock_runtime_client,
+        ses_client=ses_client,
+        clock=clock,
+        collector=collector,
+    ).run()
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:

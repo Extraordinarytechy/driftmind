@@ -1,14 +1,14 @@
 # DriftMind
 
-DriftMind is an AI-powered infrastructure intelligence prototype for AWS. It converts versioned infrastructure snapshots into deterministic change evidence, asks Amazon Bedrock for a strictly structured executive analysis, and delivers an escaped HTML and plain-text report through Amazon SES.
+DriftMind is an AI-powered infrastructure intelligence agent for AWS. It creates versioned snapshots, loads the latest previous snapshot from Amazon S3, produces deterministic drift evidence, conditionally asks Amazon Bedrock for structured risk analysis, stores a frontend-ready report, and sends drift-only notifications through Amazon SES.
 
-> **Status:** Feature-complete prototype. Snapshot, diff, intelligence, and notification components are implemented and unit tested. Scheduled deployment infrastructure and full end-to-end Lambda orchestration are not yet implemented.
+> **Status:** Autonomous Lambda pipeline and read-only AWS discovery are implemented and unit tested. Snapshot collection, S3 baseline discovery, deterministic diffing, cost-aware decisions, Bedrock analysis, report storage, and conditional SES delivery are connected. EventBridge and infrastructure-as-code provisioning remain external deployment work.
 
 ## Project Overview
 
 DriftMind is designed to help teams understand infrastructure drift without manually reviewing raw configuration documents. Its deterministic pipeline identifies exactly what was added, removed, or modified before any generative model is invoked. Amazon Bedrock receives only that validated change report, and its response must satisfy a strict JSON contract before it can be formatted and delivered.
 
-The current prototype includes a deterministic demo provider, S3 snapshot storage, local previous/current snapshot loading, property-level comparison, Bedrock Runtime integration, and multipart SES reporting. It does not yet collect live AWS resources, discover snapshot history in S3, or provision a scheduled AWS deployment.
+Collection can use the deterministic `DemoProvider` or the read-only `AWSProvider`, which discovers Lambda, S3, IAM, DynamoDB, CloudWatch alarm, EventBridge rule, SNS, and SQS configuration. Both feed the same snapshot schema and autonomous pipeline. The repository does not provision an EventBridge schedule or other infrastructure.
 
 ## Problem Statement
 
@@ -46,34 +46,33 @@ This boundary keeps infrastructure detection deterministic and auditable while u
 ## High-Level Architecture
 
 ```text
-Amazon EventBridge (intended deployment; not provisioned)
+Amazon EventBridge (intended schedule; not provisioned)
         |
         v
-AWS Lambda orchestration (intended; only the snapshot handler exists)
+AWS Lambda autonomous orchestrator
         |
         v
 Snapshot Engine ---> Amazon S3 snapshot object
         |
         v
-Previous Snapshot Loader (local JSON in the current prototype)
+Previous Snapshot Loader (automatic S3 discovery)
         |
         v
-Diff Engine
-        |
-        v
-Amazon Bedrock Runtime
-        |
-        v
-Validated Executive Analysis
-        |
-        v
-Report Formatter
-        |
-        v
-Amazon SES
+Deterministic Diff Engine ---> Decision Engine
+        |                            |
+        | no drift                   | drift
+        v                            v
+Healthy Report              Amazon Bedrock Runtime
+        |                            |
+        |                    Validated Risk Analysis
+        |                            |
+        |                     Drift-only Amazon SES
+        +------------+---------------+
+                     v
+             Amazon S3 Report
 ```
 
-EventBridge scheduling and complete Lambda orchestration represent the intended deployment architecture. The repository currently implements the individual processing and delivery components, not the scheduled infrastructure that connects them in AWS. See [architecture/architecture.md](architecture/architecture.md) for the detailed design and implementation boundaries.
+EventBridge remains the intended scheduler and is not provisioned by this repository. The Lambda handler implements the autonomous processing path and stores every run report under `reports/` for read-only consumers. See [architecture/architecture.md](architecture/architecture.md) for the detailed design and deployment boundaries.
 
 ## Example Workflow
 
@@ -81,106 +80,92 @@ EventBridge scheduling and complete Lambda orchestration represent the intended 
 Scheduled Run (intended EventBridge trigger)
         |
         v
-Snapshot Created
+Current Snapshot Stored
         |
         v
-Previous Snapshot Loaded
+Latest Previous Snapshot Loaded from S3
         |
         v
-Deterministic Diff Generated
+Deterministic Diff + Decision
         |
-        v
-Bedrock Analysis Validated
+        +-- No drift --> Healthy Report --> S3
         |
-        v
-Executive Report Formatted
-        |
-        v
-Amazon SES Delivery
+        +-- Drift --> Bedrock Risk Analysis --> SES Alert --> S3 Report
 ```
 
-In the current prototype, snapshot creation, local snapshot loading, diffing, Bedrock analysis, formatting, and SES delivery are implemented as composable components. The scheduled trigger, S3 history discovery, and single end-to-end orchestrator remain future work.
+The Lambda handler executes this workflow autonomously when invoked. Bedrock and SES are constructed only after deterministic drift is detected; baseline and healthy runs skip both services.
 
 ## AWS Services Used
 
 | AWS service | Role | Current status |
 | --- | --- | --- |
-| Amazon S3 | Stores validated snapshot JSON objects | Storage adapter implemented; bucket provisioning is not included |
-| Amazon Bedrock Runtime | Converts deterministic diffs into structured executive analysis | Converse API wrapper, prompt, and response validation implemented |
-| Amazon SES | Sends UTF-8 multipart reports with HTML and plain-text alternatives | `send_raw_email` adapter implemented |
-| AWS Lambda | Intended runtime for the workflow | Snapshot Lambda handler implemented; complete workflow orchestration is not |
-| Amazon EventBridge | Intended scheduled trigger | Not provisioned or implemented |
-| Amazon CloudWatch | Intended destination for Lambda logs and operational telemetry | Standard structured-style logging exists; custom metrics and alarms do not |
+| Amazon S3 | Stores immutable snapshots and frontend-ready autonomous reports | Snapshot writes, paginated baseline loading, and report storage implemented; bucket provisioning is not included |
+| Amazon Bedrock Runtime | Converts deterministic drift into strict risk analysis | Drift-gated Converse API wrapper and strict response validation implemented |
+| Amazon SES | Sends drift-only UTF-8 multipart alerts | Invoked only after drift analysis; `send_raw_email` adapter implemented |
+| AWS Lambda | Runs the autonomous watcher workflow | Complete snapshot-to-report orchestration implemented |
+| Amazon EventBridge | Intended scheduled trigger | Not provisioned by this repository |
+| Amazon CloudWatch | Receives Lambda logs | Required lifecycle decisions are logged; custom metrics and alarms are not implemented |
 
-AWS integrations use the AWS SDK for Python (`boto3`) and support injected clients for testing.
+AWS integrations use the AWS SDK for Python (`boto3`) and support injected clients for testing. With `PROVIDER=aws`, read-only collectors cover:
+
+- AWS Lambda functions
+- Amazon S3 buckets in the configured Region
+- AWS IAM roles
+- Amazon DynamoDB tables
+- Amazon CloudWatch metric and composite alarms
+- Amazon EventBridge rules across visible event buses
+- Amazon SNS topics
+- Amazon SQS queues
+
+Collectors paginate where supported, normalize stable fields, sort deterministically, and isolate service failures. They do not mutate observed resources. See [docs/AWS_PROVIDER_IAM.md](docs/AWS_PROVIDER_IAM.md) for the minimum discovery policy.
 
 ## Repository Structure
 
-Project files, excluding Git metadata and ignored Python caches:
+Key public project files, excluding Git metadata, local evidence, dependencies, and generated artifacts:
 
 ```text
 driftmind/
-├── .env.example
-├── .gitignore
+├── backend/
+│   ├── collectors/
+│   ├── lambda/
+│   │   ├── agent/
+│   │   ├── ai/
+│   │   ├── diff/
+│   │   └── notification/
+│   ├── providers/
+│   ├── scripts/package_lambda.py
+│   ├── snapshot/
+│   ├── tests/
+│   ├── config.py
+│   ├── logger.py
+│   ├── models.py
+│   ├── requirements.txt
+│   └── storage.py
+├── frontend/
+│   ├── public/sample-report.json
+│   ├── src/
+│   ├── .env.development
+│   ├── .env.production
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── vite.config.ts
+├── .github/workflows/tests.yml
+├── architecture/
+├── docs/
+├── CHANGELOG.md
+├── CONTRIBUTING.md
 ├── LICENSE
 ├── README.md
-├── config.py
-├── logger.py
-├── models.py
-├── requirements.txt
-├── storage.py
-├── architecture/
-│   └── architecture.md
-├── docs/
-│   ├── AWS_SERVICES.md
-│   ├── DEVELOPMENT_PLAN.md
-│   └── PROJECT_SPEC.md
-├── lambda/
-│   ├── app.py
-│   ├── ai/
-│   │   ├── client.py
-│   │   ├── models.py
-│   │   ├── parser.py
-│   │   ├── prompt.py
-│   │   └── service.py
-│   ├── diff/
-│   │   ├── comparator.py
-│   │   ├── loader.py
-│   │   ├── models.py
-│   │   └── report.py
-│   └── notification/
-│       ├── email.py
-│       ├── formatter.py
-│       ├── models.py
-│       └── service.py
-├── prompts/
-│   └── .gitkeep
-├── providers/
-│   ├── aws_provider.py
-│   ├── base.py
-│   └── demo_provider.py
-├── sample_data/
-│   └── .gitkeep
-├── screenshots/
-│   └── .gitkeep
-├── snapshot/
-│   └── collector.py
-├── snapshots/
-│   └── .gitkeep
-└── tests/
-    ├── test_ai_engine.py
-    ├── test_diff_engine.py
-    ├── test_notification.py
-    └── test_snapshot.py
+└── SECURITY.md
 ```
 
-## Installation
+## Backend Installation
 
-DriftMind targets **Python 3.12**.
+DriftMind targets **Python 3.12**. Run backend commands from the backend project directory:
 
 ```shell
 git clone <repository-url>
-cd driftmind
+cd driftmind/backend
 python -m venv .venv
 ```
 
@@ -196,7 +181,7 @@ Activate the environment:
 source .venv/bin/activate
 ```
 
-Install the repository requirements:
+Install the backend requirements:
 
 ```shell
 python -m pip install --upgrade pip
@@ -205,7 +190,26 @@ python -m pip install -r requirements.txt
 
 The test suite uses the Python standard library and does not require live AWS access. AWS Lambda's Python runtime includes `boto3`; invoking an AWS adapter outside Lambda requires a compatible local `boto3` installation and credentials available through the standard AWS SDK credential chain.
 
-There is currently no deployment command or end-to-end CLI. Use the unit suite to run the implemented workflow components locally without contacting AWS.
+Build the reproducible Lambda artifact from `backend/`:
+
+```shell
+python scripts/package_lambda.py
+```
+
+The script vendors Python 3.12-compatible dependencies, writes `backend/dist/deployment.zip`, and validates `lambda.app.lambda_handler` directly from the ZIP. Infrastructure provisioning and EventBridge schedule creation are intentionally not performed by the build.
+
+## Frontend Dashboard
+
+The dashboard is an independent Vite project. Run frontend commands from `frontend/`:
+
+```shell
+cd ../frontend
+npm install
+npm run dev
+npm run build
+```
+
+Development uses `.env.development` and the local `public/sample-report.json`. Production uses `.env.production`; set `VITE_REPORT_SOURCE` to the deployed Lambda Function URL or report JSON URL before building. Vite environment variables are public build-time values and must not contain credentials.
 
 ## Configuration
 
@@ -213,26 +217,26 @@ Configuration is read directly from process environment variables. The applicati
 
 | Variable | Required by | Description | Default |
 | --- | --- | --- | --- |
-| `AWS_REGION` | Snapshot storage, Bedrock, SES | AWS Region used to initialize service clients | None |
+| `AWS_REGION` | AWS discovery, snapshot storage, Bedrock, SES | AWS Region used to initialize service clients and scope regional discovery | None |
 | `SNAPSHOT_BUCKET` | Snapshot storage | Existing S3 bucket that receives snapshot JSON | None |
-| `PROVIDER` | Snapshot collection | Provider name; only `demo` is executable today | None |
+| `PROVIDER` | Snapshot collection | `demo` for deterministic local resources or `aws` for live read-only discovery | None |
 | `BEDROCK_MODEL_ID` | Bedrock intelligence | Bedrock model or inference profile identifier | None |
 | `BEDROCK_TEMPERATURE` | Bedrock intelligence | Temperature from `0.0` to `1.0` | `0.0` |
 | `BEDROCK_MAX_TOKENS` | Bedrock intelligence | Positive maximum output-token count | `1024` |
 | `SES_SENDER` | SES delivery | One plain sender email address configured for SES | None |
 | `SES_RECIPIENT` | SES delivery | One plain recipient email address permitted by SES | None |
 
-No model ID, bucket, account identifier, sender, or recipient is hardcoded. Selecting `aws` as the provider reaches the intentionally unimplemented `AWSProvider`; the deterministic `demo` provider is the only current collector.
+No model ID, bucket, account identifier, sender, or recipient is hardcoded. Set `PROVIDER=demo` for reproducible sample snapshots with no discovery calls. Set `PROVIDER=aws` to discover live resources using the Lambda execution role and standard boto3 credential chain. AWS mode calls STS once to derive `aws:<account-id>:<region>` as the snapshot environment, preventing comparisons across accounts or Regions. It needs no new environment variable beyond the existing `AWS_REGION` and `PROVIDER=aws`; grant the [minimum read-only discovery permissions](docs/AWS_PROVIDER_IAM.md).
 
 ## Running Tests
 
-Run the complete suite from the repository root:
+Run the complete suite from the `backend/` project directory:
 
 ```shell
 python -m unittest discover -s tests -v
 ```
 
-The tests mock or inject S3, Bedrock Runtime, and SES clients. They do not call AWS or send email.
+The tests mock or inject AWS discovery, STS, S3, Bedrock Runtime, and SES clients. They do not call AWS or send email.
 
 ## Implemented Components
 
@@ -243,58 +247,71 @@ The tests mock or inject S3, Bedrock Runtime, and SES clients. They do not call 
 - Canonical JSON serialization and date-partitioned S3 object keys
 - Conditional, AES256-encrypted S3 uploads
 - Environment-based snapshot configuration
-- Snapshot-focused Lambda handler
+- Autonomous Lambda entry point that preserves the original snapshot response fields
+- Backward-compatible `demo` and `aws` providers using one common resource schema
+- Read-only, paginated AWS discovery for Lambda, S3, IAM, DynamoDB, CloudWatch alarms, EventBridge rules, SNS, and SQS
+- Shared boto3 session, account/Region-scoped environment identity, per-service failure isolation, and deterministic ordering
 
-Live AWS resource collection is not implemented; `AWSProvider` is an explicit placeholder.
+`DemoProvider` snapshots are fixed and network-free, making them suitable for local development and repeatable tests. `AWSProvider` snapshots reflect normalized live configuration visible to the execution role in one account and Region; volatile runtime counters, timestamps, status fields, Lambda environment values, and raw provider responses are excluded.
 
 ### Infrastructure Diff Engine
 
-- Strict loading of previous and current snapshots from local JSON files
+- Strict loading of snapshots from local JSON and automatically selected S3 objects
+- Paginated discovery of the latest older canonical snapshot key
 - Compatibility checks for schema version, provider, and environment
 - Added, removed, and recursively modified property detection
 - Stable sequential identifiers such as `CHG-0001`
 - Deterministic JSON reports containing numeric summaries and before/after evidence
 
-S3 snapshot-history scanning and automatic baseline selection are not implemented.
+The S3 loader ignores noncanonical keys and chooses the latest canonical snapshot strictly older than the current object. Snapshot compatibility is then enforced by the deterministic comparator.
 
 ### Amazon Bedrock Intelligence Engine
 
-- Deterministic, versioned prompt with explicit grounding and anti-hallucination rules
-- Fixed input-size bound that rejects oversized evidence without truncating it
+- Deterministic, versioned prompts with explicit grounding and anti-hallucination rules
+- Fixed input-size bounds that reject oversized evidence without truncating it
 - Environment-configured Bedrock Runtime Converse client
-- Strict parsing of the exact executive-analysis JSON schema
-- Typed executive analysis and recommendation models
-- Redacted provider failures and lifecycle logging
+- Drift-only autonomous contract with `executive_summary`, `change_explanation`, `potential_impact`, `risk_level`, and `recommendations`
+- Exact risk levels: `Low`, `Medium`, `High`, and `Critical`
+- Strict parsing, typed models, redacted provider failures, and lifecycle logging
 
-Structural validation ensures response shape and types; it does not independently prove the semantic accuracy of model conclusions.
+Bedrock is never constructed or invoked for baseline and healthy runs. Structural validation guarantees response shape and types; it does not independently prove the semantic accuracy of model conclusions.
 
 ### Notification & Reporting Engine
 
-- Deterministic HTML and plain-text executive reports
-- Correct escaping of model content in HTML
-- UTC generation timestamp and matching report sections
-- Environment-configured SES sender and recipient
-- Explicit UTF-8 `multipart/alternative` MIME generation
-- Typed successful-delivery result containing the SES message ID
+- Stable schema `1.0` autonomous reports for baseline, healthy, drift, and downstream-failure evidence
+- Immutable report objects under `reports/YYYY/MM/DD/report-<timestamp>.json`
+- Frontend-ready health, drift, risk, AI, delivery, snapshot, and activity fields
+- Drift-only HTML and plain-text alerts containing deterministic changes, risk, AI explanation, impact, and recommendations
+- Correct escaping of model content and deterministic UTF-8 `multipart/alternative` MIME generation
+- Environment-configured SES sender and recipient with typed delivery results
 - Redacted SES failures and delivery lifecycle logging
 
-Retries, persisted idempotency, retry queues, and alternate notification channels are not implemented.
+SES is never constructed or invoked for baseline and healthy runs. Retries, persisted idempotency, retry queues, and alternate notification channels are not implemented.
+
+### Autonomous Watcher Orchestration
+
+- Uploads the current validated snapshot and discovers the latest older canonical snapshot through paginated S3 listing
+- Creates an initial baseline report when no previous snapshot exists
+- Runs deterministic comparison on every subsequent invocation
+- Skips Bedrock and SES for healthy runs
+- Invokes strict risk analysis and sends SES only when drift exists
+- Stores every completed run report as the source of truth for future read-only consumers
+- Persists drift evidence before re-raising Bedrock analysis or SES delivery failures
+- Emits lifecycle logs for baseline loading, comparison, change count, Bedrock, report storage, and SES
 
 ## Security Principles
 
-- **Least privilege:** AWS roles should permit only the required S3, Bedrock Runtime, SES, and logging actions for the selected resources.
+- **Least privilege:** AWS roles should permit only the [documented read-only discovery actions](docs/AWS_PROVIDER_IAM.md) plus required S3, Bedrock Runtime, SES, and logging actions for selected resources.
 - **Deterministic evidence first:** Snapshots and diffs are validated before generative interpretation, preserving a clear evidence boundary.
 - **No credential logging:** Credentials, report bodies, model output, and recipient addresses are not written to application logs.
 - **Provider error redaction:** S3, Bedrock, and SES failures expose sanitized application errors without raw provider messages in logs or public responses.
-- **Environment-only configuration:** AWS Region, storage, model, sender, and recipient settings remain outside source code.
+- **Environment-only configuration:** AWS Region, storage, model, sender, and recipient settings remain outside application source code.
 
 ## Future Enhancements
 
-- Implement read-only collection of live AWS resources in `AWSProvider`.
-- Discover compatible previous snapshots from S3.
-- Connect all components through a complete Lambda orchestrator.
 - Provision scheduled execution with EventBridge and infrastructure as code.
 - Add bounded retries, delivery idempotency, operational metrics, and alarms.
+- Define concurrency and baseline-promotion policy for overlapping or failed runs.
 - Expand to multiple AWS accounts, Regions, and resource types.
 - Add historical trend analysis and deployment-event correlation.
 - Support additional report destinations behind explicit safety controls.

@@ -65,6 +65,11 @@ class SnapshotStorage:
         self._region = region
         self._s3_client = s3_client or self._create_s3_client(region)
 
+    @property
+    def client(self) -> S3Client:
+        """Return the configured client for cohesive snapshot/report operations."""
+        return self._s3_client
+
     @staticmethod
     def _create_s3_client(region: str) -> S3Client:
         try:

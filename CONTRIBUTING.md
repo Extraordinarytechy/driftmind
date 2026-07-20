@@ -12,13 +12,14 @@ Thank you for contributing. DriftMind is an evidence-first AWS infrastructure in
 
 ## Repository Layout
 
-- `snapshot/`, `models.py`, `storage.py`, and `config.py`: snapshot collection, contracts, serialization, storage, and configuration.
-- `providers/`: provider interface, deterministic demo provider, and the explicit future AWS provider boundary.
-- `lambda/diff/`: local snapshot loading and deterministic comparison.
-- `lambda/ai/`: Amazon Bedrock Runtime client, bounded request construction, response models, and strict JSON parsing.
-- `lambda/notification/`: report formatting, MIME generation, and Amazon SES delivery.
-- `lambda/app.py`: snapshot-focused Lambda entry point; it is not complete workflow orchestration.
-- `tests/`: standard-library unit tests using injected or mocked AWS clients.
+- `backend/snapshot/`, `backend/models.py`, `backend/storage.py`, and `backend/config.py`: snapshot collection, contracts, serialization, storage, and configuration.
+- `backend/providers/`: provider interface, deterministic demo provider, and read-only AWS provider.
+- `backend/lambda/diff/`: snapshot loading and deterministic comparison.
+- `backend/lambda/ai/`: Amazon Bedrock Runtime client, bounded request construction, response models, and strict JSON parsing.
+- `backend/lambda/notification/`: report formatting, MIME generation, and Amazon SES delivery.
+- `backend/lambda/app.py`: Lambda entry point for the autonomous workflow.
+- `backend/tests/`: standard-library unit tests using injected or mocked AWS clients.
+- `frontend/`: independent React/Vite read-only dashboard.
 - `architecture/` and `docs/`: implementation boundaries, target architecture, service rationale, and project documentation.
 
 ## Coding Standards
@@ -29,7 +30,7 @@ Keep provider-specific collection separate from normalized snapshot models. Keep
 
 ## Testing
 
-Run the complete suite from the repository root:
+Run the complete suite from the `backend/` project directory:
 
 ```shell
 python -m unittest discover -s tests -v

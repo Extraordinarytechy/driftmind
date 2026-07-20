@@ -180,9 +180,21 @@ class BedrockClient:
             LOGGER.error("Model invocation failed reason=invalid_response")
             raise
         except Exception as exc:
-            LOGGER.error(
-                "Model invocation failed error_type=%s", type(exc).__name__
-            )
+            response = getattr(exc, "response", None)
+            error_details = response.get("Error") if isinstance(response, dict) else None
+            if isinstance(error_details, dict):
+                error_code = str(error_details.get("Code", ""))
+                error_message = str(error_details.get("Message", ""))
+                LOGGER.error(
+                    "Model invocation failed error_type=%s aws_error_code=%s aws_error_message=%s",
+                    type(exc).__name__,
+                    error_code,
+                    error_message,
+                )
+            else:
+                LOGGER.error(
+                    "Model invocation failed error_type=%s", type(exc).__name__
+                )
             raise BedrockInvocationError("Bedrock model invocation failed") from None
 
         LOGGER.info(

@@ -1,0 +1,51 @@
+{
+  "schema_version": "1.0",
+  "run_time": "2026-07-20T11:18:00Z",
+  "status": "DRIFT_DETECTED",
+  "resources_scanned": 11,
+  "changes_detected": true,
+  "bedrock_invoked": true,
+  "summary": "A metadata change was detected in the payment worker Lambda function.",
+  "drift_summary": { "total_changes": 1, "added": 0, "removed": 0, "modified": 1 },
+  "added": [],
+  "removed": [],
+  "modified": [
+    {
+      "change_id": "CHG-0001",
+      "change_type": "modified",
+      "resource_type": "Lambda",
+      "logical_name": "payment-worker",
+      "field": "description",
+      "old": "Processes payment events",
+      "new": "Processes and validates payment events"
+    }
+  ],
+  "risk": "Medium",
+  "ai_summary": "DriftMind detected a metadata change in an AWS Lambda function. No IAM, runtime, networking, or environment configuration drift was detected.",
+  "ai_explanation": "Only the function description changed; execution settings and access controls remain aligned with the previous baseline.",
+  "potential_impact": "Metadata only. The change is not expected to alter runtime behavior, permissions, networking, or cost.",
+  "recommendation": "Verify the deployment history. Approve the change if expected; otherwise investigate the modification.",
+  "recommendations": ["Verify the deployment history.", "Approve the change if expected; otherwise investigate the modification."],
+  "analysis": {
+    "executive_summary": "DriftMind detected a metadata change in an AWS Lambda function. No IAM, runtime, networking, or environment configuration drift was detected.",
+    "change_explanation": "Only the function description changed; execution settings and access controls remain aligned with the previous baseline.",
+    "potential_impact": "Metadata only. The change is not expected to alter runtime behavior, permissions, networking, or cost.",
+    "risk_level": "Medium",
+    "recommendations": ["Verify the deployment history.", "Approve the change if expected; otherwise investigate the modification."]
+  },
+  "snapshots": {
+    "current": "snapshots/2026/07/20/snapshot-20260720T111800Z.json",
+    "previous": "snapshots/2026/07/20/snapshot-20260720T101800Z.json"
+  },
+  "ses_sent": true,
+  "ses_message_id": "demo-message-20260720T111800Z",
+  "activity_timeline": [
+    { "stage": "SNAPSHOT_COLLECTED", "status": "COMPLETED", "timestamp": "2026-07-20T11:18:00Z" },
+    { "stage": "SNAPSHOT_STORED", "status": "COMPLETED", "timestamp": "2026-07-20T11:18:02Z" },
+    { "stage": "PREVIOUS_SNAPSHOT_LOADED", "status": "COMPLETED", "timestamp": "2026-07-20T11:18:03Z" },
+    { "stage": "SNAPSHOT_COMPARISON", "status": "COMPLETED", "timestamp": "2026-07-20T11:18:04Z" },
+    { "stage": "BEDROCK_ANALYSIS", "status": "COMPLETED", "timestamp": "2026-07-20T11:18:07Z" },
+    { "stage": "SES_NOTIFICATION", "status": "COMPLETED", "timestamp": "2026-07-20T11:18:09Z" },
+    { "stage": "REPORT_STORED", "status": "COMPLETED", "timestamp": "2026-07-20T11:18:10Z" }
+  ]
+}
