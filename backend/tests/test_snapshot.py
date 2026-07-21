@@ -205,7 +205,15 @@ class LambdaPipelineTests(unittest.TestCase):
         self.assertEqual(uploaded_keys[2], "reports/latest.json")
         historical = s3_client.put_object.call_args_list[1].kwargs
         latest = s3_client.put_object.call_args_list[2].kwargs
-        self.assertEqual(latest["Body"], historical["Body"])
+        historical_document = json.loads(historical["Body"])
+        latest_document = json.loads(latest["Body"])
+        # Immutable historical report keeps the stable schema untouched.
+        self.assertNotIn("analysis_source", historical_document)
+        self.assertNotIn("last_drift_analysis", historical_document)
+        # Latest is additively enriched; no prior drift means source "none".
+        self.assertEqual(latest_document["analysis_source"], "none")
+        self.assertIsNone(latest_document["last_drift_analysis"])
+        self.assertIsNone(latest_document["analysis"])
         self.assertNotIn("IfNoneMatch", latest)
         self.assertEqual(latest["CacheControl"], "no-cache, max-age=0")
 

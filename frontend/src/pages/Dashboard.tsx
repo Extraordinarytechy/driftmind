@@ -8,7 +8,7 @@ import { KPICard } from "../components/KPICard";
 import { PipelineFlow } from "../components/PipelineFlow";
 import { ReportsTable } from "../components/ReportsTable";
 import { RiskAssessment } from "../components/RiskAssessment";
-import { flattenChanges, formatDateTime, formatRelativeTime, pipelineStages, statusLabel } from "../lib/report";
+import { effectiveAnalysis, flattenChanges, formatDateTime, formatRelativeTime, pipelineStages, statusLabel } from "../lib/report";
 import { getAutonomousReport, type AutonomousReport } from "../services/api";
 
 export function Dashboard() {
@@ -28,13 +28,15 @@ export function Dashboard() {
 
   const changes = flattenChanges(report);
   const statusValue = report.status === "DRIFT_DETECTED" ? `${report.drift_summary.total_changes} Drift Detected` : statusLabel(report.status);
+  const effective = effectiveAnalysis(report);
+  const riskDetail = effective.source === "generated" ? "AI-assessed change risk" : effective.source === "last_drift" ? "From most recent detected drift" : "No AI assessment available";
   return <div className="relative min-h-screen"><Header report={report} />
     <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
       <section aria-label="Latest autonomous scan metrics" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KPICard title="Resources Scanned" value={report.resources_scanned} detail="Evaluated in the latest snapshot" icon={Server} />
         <KPICard title="Latest Scan" value={formatRelativeTime(report.run_time)} detail={formatDateTime(report.run_time)} icon={Clock3} />
         <KPICard title="Current Drift Status" value={statusValue} detail={report.summary} icon={GitCompareArrows} accent={report.changes_detected} />
-        <KPICard title="Risk Level" value={report.risk ?? "Not analyzed"} detail={report.analysis ? "AI-assessed change risk" : "No AI assessment available"} icon={ShieldAlert} accent={Boolean(report.risk && report.risk !== "Low")} />
+        <KPICard title="Risk Level" value={effective.analysis?.risk_level ?? "Not analyzed"} detail={riskDetail} icon={ShieldAlert} accent={Boolean(effective.analysis && effective.analysis.risk_level !== "Low")} />
       </section>
       <section className="grid gap-6 lg:grid-cols-3"><div className="lg:col-span-2"><AISummary report={report} /></div><RiskAssessment report={report} changes={changes} /></section>
       <PipelineFlow stages={pipelineStages(report)} />

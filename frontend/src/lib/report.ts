@@ -1,7 +1,24 @@
-import type { ActivityStatus, AutonomousReport, NativeChange, ReportStatus, RiskLevel } from "../services/api";
+import type { AnalysisSource, ActivityStatus, AutonomousReport, DriftAnalysis, NativeChange, ReportStatus, RiskLevel } from "../services/api";
 
 export type PipelineState = ActivityStatus | "PENDING";
 export interface PipelineStage { label: string; status: PipelineState }
+
+export interface EffectiveAnalysis {
+  analysis: DriftAnalysis | null;
+  source: AnalysisSource;
+  runTime: string | null;
+}
+
+/**
+ * Resolve the analysis to display. When the latest scan generated its own
+ * analysis (drift), that is used. When the latest scan had no drift, the most
+ * recent detected drift's analysis is reused for display only.
+ */
+export function effectiveAnalysis(report: AutonomousReport): EffectiveAnalysis {
+  if (report.analysis) return { analysis: report.analysis, source: "generated", runTime: report.run_time };
+  if (report.last_drift_analysis) return { analysis: report.last_drift_analysis, source: "last_drift", runTime: report.last_drift_run_time };
+  return { analysis: null, source: "none", runTime: null };
+}
 
 export function flattenChanges(report: AutonomousReport): NativeChange[] {
   return [...report.added, ...report.removed, ...report.modified].sort((a, b) => a.change_id.localeCompare(b.change_id));

@@ -16,6 +16,9 @@ from storage import build_snapshot_key, serialize_snapshot
 _app = importlib.import_module("lambda.app")
 _drift_ai = importlib.import_module("lambda.ai.drift")
 _s3_loader = importlib.import_module("lambda.diff.s3_loader")
+_storage = importlib.import_module("lambda.agent.storage")
+_agent_models = importlib.import_module("lambda.agent.models")
+_diff_models = importlib.import_module("lambda.diff.models")
 
 FIXED_TIME = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
 FULL_ENV = {
@@ -373,6 +376,95 @@ class AutonomousPipelineTests(unittest.TestCase):
         self.assertIn(f"response_chars={len(model_text)}", logs)
         self.assertIn(f"model_text={model_text}", logs)
 
+    def test_drift_then_two_healthy_runs_reuse_last_drift_in_latest(self) -> None:
+        s3 = FakeS3Client()
+        s3.seed_snapshot(
+            snapshot(
+                "2026-07-20T06:00:00.000000Z",
+                [resource("AWS::Lambda::Function", "web", memory=128)],
+            )
+        )
+        bedrock = bedrock_client()
+        ses = ses_client()
+
+        drift = snapshot(
+            "2026-07-20T12:00:00.000000Z",
+            [resource("AWS::Lambda::Function", "web", memory=256)],
+        )
+        healthy_first = snapshot(
+            "2026-07-20T18:00:00.000000Z",
+            [resource("AWS::Lambda::Function", "web", memory=256)],
+        )
+        healthy_second = snapshot(
+            "2026-07-21T00:00:00.000000Z",
+            [resource("AWS::Lambda::Function", "web", memory=256)],
+        )
+
+        def run(current: Snapshot) -> dict[str, Any]:
+            return _app.run_snapshot_pipeline(
+                environ=FULL_ENV,
+                s3_client=s3,
+                collector=StaticCollector(current),
+                bedrock_runtime_client=bedrock,
+                ses_client=ses,
+            )
+
+        result_drift = run(drift)
+        latest_drift = json.loads(s3.objects["reports/latest.json"])
+        result_healthy_1 = run(healthy_first)
+        latest_healthy_1 = json.loads(s3.objects["reports/latest.json"])
+        result_healthy_2 = run(healthy_second)
+        latest_healthy_2 = json.loads(s3.objects["reports/latest.json"])
+
+        # Pipeline decisions: one drift, then two healthy runs.
+        self.assertEqual(result_drift["pipeline_status"], "DRIFT_DETECTED")
+        self.assertEqual(result_healthy_1["pipeline_status"], "HEALTHY")
+        self.assertEqual(result_healthy_2["pipeline_status"], "HEALTHY")
+
+        # Bedrock and SES invoked exactly once, only for the drift run.
+        self.assertEqual(bedrock.converse.call_count, 1)
+        self.assertEqual(ses.send_raw_email.call_count, 1)
+
+        # analysis_source transitions generated -> last_drift -> last_drift.
+        self.assertEqual(latest_drift["analysis_source"], "generated")
+        self.assertEqual(latest_healthy_1["analysis_source"], "last_drift")
+        self.assertEqual(latest_healthy_2["analysis_source"], "last_drift")
+
+        # last_drift_analysis persists unchanged across healthy runs.
+        drift_analysis = latest_drift["last_drift_analysis"]
+        self.assertIsNotNone(drift_analysis)
+        self.assertEqual(drift_analysis["risk_level"], "Medium")
+        self.assertEqual(latest_healthy_1["last_drift_analysis"], drift_analysis)
+        self.assertEqual(latest_healthy_2["last_drift_analysis"], drift_analysis)
+
+        # last_drift_run_time stays pinned to the drift run.
+        self.assertEqual(latest_drift["last_drift_run_time"], "2026-07-20T12:00:00.000000Z")
+        self.assertEqual(latest_healthy_1["last_drift_run_time"], "2026-07-20T12:00:00.000000Z")
+        self.assertEqual(latest_healthy_2["last_drift_run_time"], "2026-07-20T12:00:00.000000Z")
+
+        # latestScan (run_time) advances on every execution.
+        self.assertEqual(latest_drift["run_time"], "2026-07-20T12:00:00.000000Z")
+        self.assertEqual(latest_healthy_1["run_time"], "2026-07-20T18:00:00.000000Z")
+        self.assertEqual(latest_healthy_2["run_time"], "2026-07-21T00:00:00.000000Z")
+
+        # Healthy latest reports carry no current-scan analysis.
+        self.assertIsNone(latest_healthy_1["analysis"])
+        self.assertIsNone(latest_healthy_2["analysis"])
+
+        # Historical reports remain unenriched and schema-consistent.
+        reports = report_documents(s3)
+        self.assertEqual(len(reports), 3)
+        self.assertEqual(reports[0]["status"], "DRIFT_DETECTED")
+        self.assertIsNotNone(reports[0]["analysis"])
+        self.assertNotIn("analysis_source", reports[0])
+        self.assertNotIn("last_drift_analysis", reports[0])
+        self.assertEqual(reports[1]["status"], "HEALTHY")
+        self.assertIsNone(reports[1]["analysis"])
+        self.assertNotIn("analysis_source", reports[1])
+        self.assertEqual(reports[2]["status"], "HEALTHY")
+        self.assertIsNone(reports[2]["analysis"])
+        self.assertNotIn("analysis_source", reports[2])
+
 
 class DriftAnalysisContractTests(unittest.TestCase):
     def assert_fallback(
@@ -440,6 +532,101 @@ class DriftAnalysisContractTests(unittest.TestCase):
             "risk_level must be Low, Medium, High, or Critical",
             "\n".join(captured.output),
         )
+
+
+class LatestReportEnrichmentTests(unittest.TestCase):
+    def _healthy_report(self) -> Any:
+        empty = _diff_models.ChangeReport(
+            summary=_diff_models.ChangeSummary(
+                total_changes=0, added=0, removed=0, modified=0
+            ),
+            changes=(),
+        )
+        report = _agent_models.AutonomousReport(
+            run_time="2026-07-20T12:00:00.000000Z",
+            status="HEALTHY",
+            resources_scanned=1,
+            changes_detected=False,
+            bedrock_invoked=False,
+            summary="Infrastructure Healthy. No drift detected.",
+            change_report=empty,
+            current_snapshot_key="snapshots/2026/07/20/snapshot-20260720T120000000000Z.json",
+            previous_snapshot_key="snapshots/2026/07/19/snapshot-20260719T120000000000Z.json",
+            analysis=None,
+        )
+        report.validate()
+        return report
+
+    def test_generated_source_when_current_report_has_analysis(self) -> None:
+        current = {"run_time": "2026-07-20T12:00:00Z", "analysis": {"risk_level": "High"}}
+
+        result = _storage.build_latest_report_payload(current, None)
+
+        self.assertEqual(result["analysis_source"], "generated")
+        self.assertEqual(result["last_drift_analysis"], {"risk_level": "High"})
+        self.assertEqual(result["last_drift_run_time"], "2026-07-20T12:00:00Z")
+
+    def test_none_source_when_no_analysis_and_no_prior(self) -> None:
+        current = {"run_time": "2026-07-20T12:00:00Z", "analysis": None}
+
+        result = _storage.build_latest_report_payload(current, None)
+
+        self.assertEqual(result["analysis_source"], "none")
+        self.assertIsNone(result["last_drift_analysis"])
+        self.assertIsNone(result["last_drift_run_time"])
+
+    def test_reuses_prior_drift_analysis_when_healthy(self) -> None:
+        current = {"run_time": "2026-07-20T12:00:00Z", "analysis": None}
+        previous_latest = {
+            "run_time": "2026-07-19T12:00:00Z",
+            "analysis": {"risk_level": "Medium"},
+        }
+
+        result = _storage.build_latest_report_payload(current, previous_latest)
+
+        self.assertEqual(result["analysis_source"], "last_drift")
+        self.assertEqual(result["last_drift_analysis"], {"risk_level": "Medium"})
+        self.assertEqual(result["last_drift_run_time"], "2026-07-19T12:00:00Z")
+
+    def test_propagates_prior_last_drift_across_consecutive_healthy_runs(self) -> None:
+        current = {"run_time": "2026-07-20T12:00:00Z", "analysis": None}
+        previous_latest = {
+            "run_time": "2026-07-19T18:00:00Z",
+            "analysis": None,
+            "analysis_source": "last_drift",
+            "last_drift_analysis": {"risk_level": "Critical"},
+            "last_drift_run_time": "2026-07-18T09:00:00Z",
+        }
+
+        result = _storage.build_latest_report_payload(current, previous_latest)
+
+        self.assertEqual(result["analysis_source"], "last_drift")
+        self.assertEqual(result["last_drift_analysis"], {"risk_level": "Critical"})
+        self.assertEqual(result["last_drift_run_time"], "2026-07-18T09:00:00Z")
+
+    def test_store_enriches_latest_and_leaves_historical_unchanged(self) -> None:
+        s3 = FakeS3Client()
+        drift_analysis = {
+            "executive_summary": "Prior drift analysis.",
+            "change_explanation": "A prior change was explained.",
+            "potential_impact": "Prior impact.",
+            "risk_level": "Medium",
+            "recommendations": ["Review the prior change."],
+        }
+        s3.objects["reports/latest.json"] = json.dumps(
+            {"run_time": "2026-07-19T12:00:00.000000Z", "analysis": drift_analysis}
+        ).encode("utf-8")
+
+        storage = _storage.ReportStorage("unit-test-bucket", s3)
+        historical_key = storage.store(self._healthy_report())
+
+        historical_document = json.loads(s3.objects[historical_key])
+        latest_document = json.loads(s3.objects["reports/latest.json"])
+        self.assertIsNone(historical_document["analysis"])
+        self.assertNotIn("analysis_source", historical_document)
+        self.assertEqual(latest_document["analysis_source"], "last_drift")
+        self.assertEqual(latest_document["last_drift_analysis"], drift_analysis)
+        self.assertIsNone(latest_document["analysis"])
 
 
 if __name__ == "__main__":

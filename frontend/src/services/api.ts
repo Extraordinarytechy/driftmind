@@ -51,7 +51,13 @@ export interface AutonomousReport {
   ses_sent: boolean;
   ses_message_id: string | null;
   activity_timeline: ActivityEvent[];
+  analysis_source: AnalysisSource;
+  last_drift_analysis: DriftAnalysis | null;
+  last_drift_run_time: string | null;
 }
+
+export type AnalysisSource = "generated" | "last_drift" | "none";
+const ANALYSIS_SOURCES: AnalysisSource[] = ["generated", "last_drift", "none"];
 
 type UnknownRecord = Record<string, unknown>;
 const REPORT_STATUSES: ReportStatus[] = ["BASELINE_CREATED", "HEALTHY", "DRIFT_DETECTED"];
@@ -227,7 +233,37 @@ export function parseAutonomousReport(value: unknown): AutonomousReport {
     ses_sent: sesSent,
     ses_message_id: sesMessageId,
     activity_timeline: source.activity_timeline.map(activity),
+    analysis_source:
+      typeof source.analysis_source === "string" && ANALYSIS_SOURCES.includes(source.analysis_source as AnalysisSource)
+        ? (source.analysis_source as AnalysisSource)
+        : "none",
+    last_drift_analysis: optionalAnalysis(source.last_drift_analysis),
+    last_drift_run_time: optionalTimestamp(source.last_drift_run_time),
   };
+}
+
+/**
+ * Parse the optional reused-analysis block defensively. It is display-only
+ * metadata, so a malformed value must degrade to null (showing the normal
+ * "AI analysis unavailable" state) rather than failing the whole report parse.
+ * The primary `analysis` field keeps its strict validation.
+ */
+function optionalAnalysis(value: unknown): DriftAnalysis | null {
+  if (value == null) return null;
+  try {
+    return analysis(value);
+  } catch {
+    return null;
+  }
+}
+
+function optionalTimestamp(value: unknown): string | null {
+  if (value == null) return null;
+  try {
+    return timestamp(value, "last_drift_run_time");
+  } catch {
+    return null;
+  }
 }
 
 function reportSource(): string {
